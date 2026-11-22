@@ -45,9 +45,25 @@
     <string name="download_manager_missing">无法打开系统下载管理</string>
     <string name="permission_denied">没有存储权限，无法下载</string>
 
+    <!-- 资源嗅探 -->
+    <string name="sniff">嗅探视频</string>
+    <string name="sniff_scanning">正在分析本页视频…</string>
+    <string name="sniff_none">本页没有发现可播放的视频（部分站点用加密流，浏览器无法直接播放）</string>
+    <string name="sniff_need_page">请先打开一个网页</string>
+    <string name="sniff_found">发现 %1$d 个视频</string>
+
+    <!-- 内置播放器 -->
+    <string name="player_rotate">旋转屏幕</string>
+    <string name="player_rewind">快退 10 秒</string>
+    <string name="player_forward">快进 10 秒</string>
+    <string name="player_play_pause">播放 / 暂停</string>
+    <string name="player_live">直播</string>
+    <string name="player_error_message">这个视频播不了，可能是加密流或链接已失效</string>
+    <string name="player_retry">重试</string>
+
     <!-- 其他 -->
     <string name="error_page_title">页面打不开</string>
     <string name="error_page_hint">请检查网络或网址后重试，也可以点下方刷新按钮</string>
     <string name="press_again_to_exit">再按一次返回键退出</string>
-    <string name="about_message">轻览浏览器 v1.1\n基于系统 WebView 的轻量浏览器，零第三方依赖，适配低端机。\n\n功能：网页浏览、网页视频全屏、文件下载、网址收藏、历史记录、分享与复制链接。</string>
+    <string name="about_message">轻览浏览器 v1.2\n基于系统 WebView 的轻量浏览器，界面零 AndroidX，仅播放内核使用 Media3。\n\n功能：网页浏览、网页视频全屏、资源嗅探 + 内置播放器（快进快退/拖动进度/横竖屏）、文件下载、网址收藏、历史记录、分享与复制链接。</string>
 </resources>
