@@ -37,14 +37,18 @@ import android.widget.Toast
 import com.litebrowser.app.data.BrowserDatabase
 import com.litebrowser.app.data.SiteCursorAdapter
 import com.litebrowser.app.download.DownloadHelper
+import com.litebrowser.app.player.MediaSniffer
+import com.litebrowser.app.player.PlayerActivity
 import com.litebrowser.app.webview.BrowserWebChromeClient
 import com.litebrowser.app.webview.BrowserWebViewClient
+import org.json.JSONArray
+import org.json.JSONTokener
 
 /**
  * 主界面：一个 WebView + 地址栏 + 底部工具条。
  *
  * 设计取向（低端机优先）：
- * - 只用系统 framework 组件（Activity / WebView / SQLite / DownloadManager），不引入 AndroidX；
+ * - 界面/存储/下载/嗅探全部用系统 framework 组件，唯一第三方依赖是播放内核 Media3；
  * - 下载交给系统下载服务，App 内不做网络与文件 IO；
  * - 收藏/历史用 CursorAdapter 直连游标，列表不一次性载入内存；
  * - 页面状态可保存恢复，后台被回收后回到原页面。
@@ -76,8 +80,41 @@ class MainActivity : Activity() {
         private const val REQ_STORAGE = 1001
         private const val REQ_NOTIFICATION = 1002
         private const val SEARCH_ENGINE = "https://www.baidu.com/s?wd="
-        private const val UA_SUFFIX = "LiteBrowser/1.1"
+        private const val UA_SUFFIX = "LiteBrowser/1.2"
         private const val KEY_NOTIFICATION_ASKED = "notification_asked"
+
+        /**
+         * 页面内探针：把 <video> 的真实地址和 performance 资源表里的媒体链接捞出来。
+         * 拦截层只能看到 WebView 发起的请求（很多播放器把主列表藏在 XHR 里，只暴露 .ts 分片），
+         * 这一层正好补上。刻意不用正则里的 $ / 反斜杠，避免和 Kotlin 字符串模板打架。
+         */
+        private val SNIFF_JS = """
+            (function () {
+              var out = [], seen = {}, exts = ['.mp4', '.m4v', '.webm', '.mkv', '.flv', '.mov', '.3gp', '.m3u8', '.mpd'];
+              function push(u) { if (!u || seen[u]) return; seen[u] = 1; out.push(u); }
+              try {
+                var vids = document.querySelectorAll('video');
+                for (var i = 0; i < vids.length; i++) {
+                  var v = vids[i], s = v.currentSrc || v.src || '';
+                  if (!s) {
+                    var ss = v.getElementsByTagName('source');
+                    for (var j = 0; j < ss.length; j++) { if (ss[j].src) { s = ss[j].src; break; } }
+                  }
+                  push(s);
+                }
+              } catch (e) {}
+              try {
+                var es = performance.getEntriesByType('resource');
+                for (var k = 0; k < es.length; k++) {
+                  var u = es[k].name || '';
+                  var p = u.split('#')[0].split('?')[0].toLowerCase();
+                  var dot = p.lastIndexOf('.');
+                  if (dot >= 0 && exts.indexOf(p.substring(dot)) >= 0) push(u);
+                }
+              } catch (e) {}
+              return JSON.stringify(out);
+            })()
+        """.trimIndent()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -155,7 +192,7 @@ class MainActivity : Activity() {
 
         webView.webChromeClient = chromeClient
         webView.webViewClient = BrowserWebViewClient(
-            onStarted = { },
+            onStarted = { MediaSniffer.clear() },
             onFinished = { url, title ->
                 // 只在真实网页上更新地址栏 / 记录历史，跳过错误页（about:blank）等
                 if (isWebUrl(url)) {
@@ -166,7 +203,8 @@ class MainActivity : Activity() {
                 }
             },
             onError = { url, description -> showErrorPage(url, description) },
-            onExternalScheme = { url -> openExternal(url) }
+            onExternalScheme = { url -> openExternal(url) },
+            onResourceRequest = { url -> MediaSniffer.add(url) }
         )
 
         webView.setDownloadListener(DownloadListener { url, userAgent, contentDisposition, mimeType, _ ->
@@ -205,6 +243,7 @@ class MainActivity : Activity() {
             openDownloads()
         }
         bookmarkButton.setOnClickListener { toggleBookmark() }
+        findViewById<ImageButton>(R.id.sniff_button).setOnClickListener { sniffVideos() }
         findViewById<ImageButton>(R.id.menu_button).setOnClickListener { showMenu() }
     }
 
@@ -403,6 +442,73 @@ class MainActivity : Activity() {
             .setMessage(getString(R.string.about_message))
             .setPositiveButton(android.R.string.ok, null)
             .show()
+    }
+
+    // ---------------- 资源嗅探 ----------------
+
+    /**
+     * 嗅探本页视频：先取拦截层已收集的，再用 JS 探针补一轮，合并去重后列出来给用户选。
+     * 只做"发现"，点击后交给内置播放器，网页本身不受任何影响。
+     */
+    private fun sniffVideos() {
+        if (currentUrl() == null) {
+            toast(getString(R.string.sniff_need_page))
+            return
+        }
+        toast(getString(R.string.sniff_scanning))
+        webView.evaluateJavascript(SNIFF_JS) { result -> showSniffResult(result) }
+    }
+
+    private fun showSniffResult(result: String?) {
+        if (isFinishing || isDestroyed) return
+
+        // evaluateJavascript 回传的是 JSON 编码值：返回字符串时外面会多一层引号
+        if (!result.isNullOrEmpty()) {
+            try {
+                val raw = if (result.startsWith("\"")) {
+                    JSONTokener(result).nextValue().toString()
+                } else {
+                    result
+                }
+                val array = JSONArray(raw)
+                for (i in 0 until array.length()) {
+                    MediaSniffer.add(array.optString(i))
+                }
+            } catch (e: Exception) {
+                // 解析失败就只用拦截层的结果，不影响主流程
+            }
+        }
+
+        val videos = MediaSniffer.snapshot()
+        if (videos.isEmpty()) {
+            toast(getString(R.string.sniff_none))
+            return
+        }
+
+        val labels = ArrayList<CharSequence>(videos.size)
+        videos.forEachIndexed { index, url ->
+            labels.add((index + 1).toString() + ". " + MediaSniffer.prettyName(url))
+        }
+        AlertDialog.Builder(this)
+            .setTitle(getString(R.string.sniff_found, videos.size))
+            .setItems(labels.toTypedArray()) { _, which -> openPlayer(videos[which]) }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
+    }
+
+    private fun openPlayer(url: String) {
+        webView.onPause()   // 网页里的 <video> 先停下，避免两个声音叠在一起
+        val intent = Intent(this, PlayerActivity::class.java).apply {
+            putExtra(PlayerActivity.EXTRA_URL, url)
+            putExtra(PlayerActivity.EXTRA_REFERER, webView.url)
+            putExtra(PlayerActivity.EXTRA_UA, webView.settings.userAgentString)
+            putExtra(PlayerActivity.EXTRA_TITLE, currentTitle)
+        }
+        try {
+            startActivity(intent)
+        } catch (e: Exception) {
+            toast(getString(R.string.player_error_message))
+        }
     }
 
     // ---------------- 下载 ----------------
