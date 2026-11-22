@@ -12,8 +12,8 @@ android {
         // 最低支持 Android 8.0 (API 26)，覆盖绝大多数仍在服役的低端机
         minSdk = 26
         targetSdk = 34
-        versionCode = 2
-        versionName = "1.1.0"
+        versionCode = 3
+        versionName = "1.2.0"
 
         testInstrumentationRunner = "android.test.InstrumentationTestRunner"
     }
@@ -45,8 +45,12 @@ android {
     }
 }
 
-// 刻意不引入 AndroidX / Material / 任何第三方库。
-// 全部使用 android.* 系统框架，这是低端机适配的关键：APK 小、方法数少、启动快、无冲突。
+// 除播放内核外不引入任何依赖：界面、数据库、下载、嗅探全部用 android.* 系统框架。
+// Media3(ExoPlayer) 是唯一例外 —— 系统 MediaPlayer 对 m3u8/fMP4 支持太差，
+// 而"嗅探网页视频"场景里 m3u8 占大多数，只能请出 ExoPlayer。
 dependencies {
-    // no dependencies by design
+    val media3 = "1.3.1"
+    implementation("androidx.media3:media3-exoplayer:$media3")
+    implementation("androidx.media3:media3-exoplayer-hls:$media3")
+    implementation("androidx.media3:media3-ui:$media3")
 }
