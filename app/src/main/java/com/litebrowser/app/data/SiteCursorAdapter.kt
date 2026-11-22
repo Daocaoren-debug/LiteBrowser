@@ -10,23 +10,24 @@ import android.widget.ImageButton
 import android.widget.TextView
 import com.litebrowser.app.R
 
-/** 用 CursorAdapter 直接绑定数据库游标，避免一次性把全部历史载入内存（低端机友好） */
+/**
+ * 用 CursorAdapter 直接绑定数据库游标，避免一次性把全部历史读进内存（低端机友好）。
+ * 删除回调同时给出 id 与 url：历史按 id 删，收藏按 url 删。
+ */
 class SiteCursorAdapter(
     context: Context,
     cursor: Cursor?,
-    private val onDelete: (Long) -> Unit
+    private val onDelete: (id: Long, url: String) -> Unit
 ) : CursorAdapter(context, cursor, 0) {
 
     private val inflater = LayoutInflater.from(context)
 
     override fun newView(context: Context?, cursor: Cursor?, parent: ViewGroup?): View {
         val view = inflater.inflate(R.layout.list_item_site, parent, false)
-        view.setTag(
-            ViewHolder(
-                view.findViewById(R.id.item_title),
-                view.findViewById(R.id.item_url),
-                view.findViewById(R.id.item_delete)
-            )
+        view.tag = ViewHolder(
+            view.findViewById(R.id.item_title),
+            view.findViewById(R.id.item_url),
+            view.findViewById(R.id.item_delete)
         )
         return view
     }
@@ -37,9 +38,10 @@ class SiteCursorAdapter(
         val title = cursor.getString(cursor.getColumnIndexOrThrow("title"))
         val url = cursor.getString(cursor.getColumnIndexOrThrow("url"))
         val id = cursor.getLong(cursor.getColumnIndexOrThrow("_id"))
-        holder.title.text = title
+
+        holder.title.text = if (title.isBlank()) url else title
         holder.url.text = url
-        holder.delete.setOnClickListener { onDelete(id) }
+        holder.delete.setOnClickListener { onDelete(id, url) }
     }
 
     private class ViewHolder(
