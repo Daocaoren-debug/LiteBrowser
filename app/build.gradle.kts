@@ -12,8 +12,8 @@ android {
         // 最低支持 Android 8.0 (API 26)，覆盖绝大多数仍在服役的低端机
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.1.0"
 
         testInstrumentationRunner = "android.test.InstrumentationTestRunner"
     }
@@ -38,7 +38,6 @@ android {
         jvmTarget = "17"
     }
 
-    // 仅保留 zh 资源，进一步压缩包体（低端机省空间）
     packaging {
         resources {
             excludes += setOf("META-INF/*.kotlin_module")
