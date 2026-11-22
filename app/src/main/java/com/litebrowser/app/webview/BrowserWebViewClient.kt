@@ -3,6 +3,7 @@ package com.litebrowser.app.webview
 import android.graphics.Bitmap
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 
@@ -16,7 +17,9 @@ class BrowserWebViewClient(
     private val onStarted: (url: String) -> Unit,
     private val onFinished: (url: String, title: String) -> Unit,
     private val onError: (url: String, description: String) -> Unit,
-    private val onExternalScheme: (url: String) -> Unit
+    private val onExternalScheme: (url: String) -> Unit,
+    /** 每个资源请求都会回调一次（WebView 子线程），用于资源嗅探 */
+    private val onResourceRequest: (url: String) -> Unit
 ) : WebViewClient() {
 
     override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
@@ -49,6 +52,18 @@ class BrowserWebViewClient(
     override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
         if (url.isNullOrEmpty()) return false
         return handleUrl(url)
+    }
+
+    /**
+     * 只旁听，不拦截：拿到响应对象原样返回，页面加载行为与不写这个方法完全一致。
+     * 这里能看到播放器真实拉取的地址（包括 m3u8 主列表和 mp4 直链）。
+     */
+    override fun shouldInterceptRequest(
+        view: WebView?,
+        request: WebResourceRequest?
+    ): WebResourceResponse? {
+        request?.url?.toString()?.let { onResourceRequest(it) }
+        return super.shouldInterceptRequest(view, request)
     }
 
     /** 返回 true 表示由我们接管（不再让 WebView 加载） */
