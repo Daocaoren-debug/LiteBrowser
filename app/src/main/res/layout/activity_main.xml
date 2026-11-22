@@ -132,7 +132,7 @@
                 android:layout_weight="1"
                 android:background="?android:attr/selectableItemBackgroundBorderless"
                 android:contentDescription="@string/downloads"
-                android:src="@android:drawable/stat_sys_download" />
+                android:src="@drawable/ic_download" />
         </LinearLayout>
     </LinearLayout>
 
