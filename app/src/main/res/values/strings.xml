@@ -58,6 +58,8 @@
     <string name="player_forward">快进 10 秒</string>
     <string name="player_play_pause">播放 / 暂停</string>
     <string name="player_live">直播</string>
+    <string name="player_fast_forward">快进中</string>
+    <string name="player_fast_rewind">快退中</string>
     <string name="player_error_message">这个视频播不了，可能是加密流或链接已失效</string>
     <string name="player_retry">重试</string>
 
@@ -65,5 +67,5 @@
     <string name="error_page_title">页面打不开</string>
     <string name="error_page_hint">请检查网络或网址后重试，也可以点下方刷新按钮</string>
     <string name="press_again_to_exit">再按一次返回键退出</string>
-    <string name="about_message">轻览浏览器 v1.2\n基于系统 WebView 的轻量浏览器，界面零 AndroidX，仅播放内核使用 Media3。\n\n功能：网页浏览、网页视频全屏、资源嗅探 + 内置播放器（快进快退/拖动进度/横竖屏）、文件下载、网址收藏、历史记录、分享与复制链接。</string>
+    <string name="about_message">轻览浏览器 v1.2.1\n基于系统 WebView 的轻量浏览器，界面零 AndroidX，仅播放内核使用 Media3。\n\n功能：网页浏览、网页视频全屏、资源嗅探 + 内置播放器（快进快退/拖动进度/横竖屏/长按边缘快进）、文件下载、网址收藏、历史记录、分享与复制链接。</string>
 </resources>
