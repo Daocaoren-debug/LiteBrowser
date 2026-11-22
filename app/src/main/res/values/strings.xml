@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">轻览浏览器</string>
+    <string name="url_hint">输入网址或搜索内容</string>
+    <string name="go">前往</string>
+    <string name="back">后退</string>
+    <string name="forward">前进</string>
+    <string name="refresh">刷新</string>
+    <string name="home">主页</string>
+    <string name="bookmark">收藏</string>
+    <string name="bookmarks">收藏夹</string>
+    <string name="history">历史记录</string>
+    <string name="downloads">下载管理</string>
+    <string name="more">更多</string>
+    <string name="about">关于</string>
+    <string name="clear_history">清空历史</string>
+    <string name="delete">删除</string>
+    <string name="open">打开</string>
+    <string name="cancel">取消</string>
+    <string name="home_url">https://www.baidu.com</string>
+    <string name="bookmark_added">已加入收藏</string>
+    <string name="bookmark_removed">已取消收藏</string>
+    <string name="history_cleared">历史记录已清空</string>
+    <string name="download_started">已开始下载</string>
+    <string name="no_bookmarks">暂无收藏，点击地址栏右侧星标添加</string>
+    <string name="no_history">暂无历史记录</string>
+    <string name="confirm_clear_history">确定清空全部历史记录？</string>
+    <string name="confirm_delete_bookmark">确定删除该收藏？</string>
+    <string name="about_message">轻览浏览器 v1.0\n基于系统 WebView 的轻量浏览器，无第三方依赖，适配低端机。\n\n功能：网页浏览、网页视频、文件下载、网址收藏、历史记录。</string>
+    <string name="error_load">页面加载失败，请检查网络或网址</string>
+    <string name="press_again_to_exit">再按一次返回键退出</string>
+</resources>

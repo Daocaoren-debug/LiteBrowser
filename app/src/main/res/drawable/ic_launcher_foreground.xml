@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- 简化的地球/浏览器标志 -->
+    <group android:scaleX="2.4" android:scaleY="2.4" android:translateX="21.6" android:translateY="21.6">
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M12,2C6.48,2 2,6.48 2,12s4.48,10 10,10 10,-4.48 10,-10S17.52,2 12,2zM11.19,20.93C7.06,20.43 3.66,17.19 3.13,13H7.09C7.54,15.15 9.12,16.9 11.19,17.6V20.93zM9.19,14.5C9.07,13.69 9,12.86 9,12s0.07,-1.69 0.19,-2.5h5.62C14.93,10.31 15,11.14 15,12s-0.07,1.69 -0.19,2.5H9.19zM12.81,3.07C15.94,3.57 19.34,6.81 19.87,11H15.91C15.46,8.85 13.88,7.1 11.81,6.4V3.07zM12.81,17.6C14.88,16.9 16.46,15.15 16.91,13H20.87C20.34,16.81 16.94,20.43 12.81,20.93V17.6z" />
+    </group>
+</vector>
