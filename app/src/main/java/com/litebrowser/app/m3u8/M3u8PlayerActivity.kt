@@ -7,7 +7,7 @@ import android.content.pm.ActivityInfo
 import android.net.Uri
 import android.os.Bundle
 import android.view.WindowManager
-import android.widget.Button
+import android.widget.ImageButton
 import android.widget.TextView
 import android.widget.Toast
 import androidx.media3.common.C
@@ -31,7 +31,7 @@ class M3u8PlayerActivity : Activity() {
 
     private var player: ExoPlayer? = null
     private var playerView: PlayerView? = null
-    private var rotateButton: Button? = null
+    private var rotateButton: ImageButton? = null
 
     /** true = 当前横屏，false = 当前竖屏；进入时按系统当前方向初始化 */
     private var landscape = false
@@ -105,7 +105,10 @@ class M3u8PlayerActivity : Activity() {
         } else {
             ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
         }
-        rotateButton?.text = getString(if (landscape) R.string.rotate_land else R.string.rotate_portrait)
+        // 图标按钮不显示文字，用无障碍描述标注当前方向
+        rotateButton?.contentDescription = getString(
+            if (landscape) R.string.rotate_land else R.string.rotate_portrait
+        )
     }
 
     override fun onStop() {

@@ -86,5 +86,5 @@
     <string name="error_page_title">页面打不开</string>
     <string name="error_page_hint">请检查网络或网址后重试，也可以点下方刷新按钮</string>
     <string name="press_again_to_exit">再按一次返回键退出</string>
-    <string name="about_message">轻览浏览器 v1.3.0\n基于系统 WebView 的轻量浏览器，仅播放与列表使用少量 AndroidX/Media3。\n\n功能：网页浏览、网页视频全屏、资源嗅探 + 内置播放器（快进快退/拖动进度/长按边缘快进）、本地 M3U8 扫描播放（手动横竖屏）、文件下载、网址收藏、历史记录、分享与复制链接。</string>
+    <string name="about_message">轻览浏览器 v1.3.1\n基于系统 WebView 的轻量浏览器，仅播放与列表使用少量 AndroidX/Media3。\n\n功能：网页浏览、网页视频全屏、资源嗅探 + 内置播放器（快进快退/拖动进度/长按边缘快进）、本地 M3U8 扫描播放（手动横竖屏）、文件下载、网址收藏、历史记录、分享与复制链接。</string>
 </resources>

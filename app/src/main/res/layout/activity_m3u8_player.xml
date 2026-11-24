@@ -28,22 +28,17 @@
         android:textColor="#FFFFFF"
         android:textSize="14sp" />
 
-    <!-- 旋屏按钮：右下角，手动横竖屏切换（无自动跟随） -->
-    <Button
+    <!-- 旋屏按钮：右下角，图标与资源嗅探播放器一致（ic_menu_rotate），手动横竖切换 -->
+    <ImageButton
         android:id="@+id/rotateButton"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
         android:layout_gravity="bottom|end"
         android:layout_marginEnd="12dp"
         android:layout_marginBottom="72dp"
-        android:background="#CC212121"
-        android:minWidth="0dp"
-        android:minHeight="0dp"
-        android:paddingStart="14dp"
-        android:paddingTop="8dp"
-        android:paddingEnd="14dp"
-        android:paddingBottom="8dp"
-        android:text="@string/rotate_portrait"
-        android:textColor="#FFFFFF"
-        android:textSize="13sp" />
+        android:background="@drawable/bg_sniff_fab"
+        android:contentDescription="@string/player_rotate"
+        android:elevation="4dp"
+        android:src="@android:drawable/ic_menu_rotate"
+        android:tint="#FFFFFF" />
 </FrameLayout>
