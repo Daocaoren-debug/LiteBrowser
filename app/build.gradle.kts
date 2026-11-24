@@ -12,8 +12,8 @@ android {
         // 最低支持 Android 8.0 (API 26)，覆盖绝大多数仍在服役的低端机
         minSdk = 26
         targetSdk = 34
-        versionCode = 4
-        versionName = "1.2.1"
+        versionCode = 5
+        versionName = "1.3.0"
 
         testInstrumentationRunner = "android.test.InstrumentationTestRunner"
     }
@@ -53,4 +53,8 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer:$media3")
     implementation("androidx.media3:media3-exoplayer-hls:$media3")
     implementation("androidx.media3:media3-ui:$media3")
+
+    // 本地 M3U8 扫描模块：列表 + SAF 目录访问
+    implementation("androidx.recyclerview:recyclerview:1.3.2")
+    implementation("androidx.documentfile:documentfile:1.0.1")
 }

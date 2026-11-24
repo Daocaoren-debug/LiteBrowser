@@ -37,6 +37,7 @@ import android.widget.Toast
 import com.litebrowser.app.data.BrowserDatabase
 import com.litebrowser.app.data.SiteCursorAdapter
 import com.litebrowser.app.download.DownloadHelper
+import com.litebrowser.app.m3u8.M3u8BrowserActivity
 import com.litebrowser.app.player.MediaSniffer
 import com.litebrowser.app.player.PlayerActivity
 import com.litebrowser.app.webview.BrowserWebChromeClient
@@ -321,6 +322,7 @@ class MainActivity : Activity() {
             getString(R.string.share_page),
             getString(R.string.copy_link),
             getString(R.string.open_in_browser),
+            getString(R.string.m3u8_library),
             getString(R.string.clear_history),
             getString(R.string.about)
         )
@@ -333,8 +335,9 @@ class MainActivity : Activity() {
                     2 -> sharePage()
                     3 -> copyLink()
                     4 -> openInSystemBrowser()
-                    5 -> confirmClearHistory()
-                    6 -> showAbout()
+                    5 -> startActivity(Intent(this, M3u8BrowserActivity::class.java))
+                    6 -> confirmClearHistory()
+                    7 -> showAbout()
                 }
             }
             .setNegativeButton(R.string.cancel, null)
