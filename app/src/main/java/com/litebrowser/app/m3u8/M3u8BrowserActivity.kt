@@ -1,5 +1,7 @@
 package com.litebrowser.app.m3u8
 
+import com.litebrowser.app.R
+
 import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager

@@ -1,5 +1,7 @@
 package com.litebrowser.app.m3u8
 
+import com.litebrowser.app.R
+
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
