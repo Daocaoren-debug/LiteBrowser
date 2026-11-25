@@ -277,6 +277,8 @@ class ConvertService : Service() {
         args += "file,crypto,data,http,https,tcp,tls"
         args += "-allowed_extensions"
         args += "ALL"
+        args += "-fflags"
+        args += "+genpts"            // 部分 TS 时间戳缺失/回绕，补生成后再封装
         args += "-i"
         args += input
         args += "-map"
