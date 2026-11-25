@@ -83,11 +83,15 @@ class M3u8BrowserActivity : Activity() {
                 }
                 ConvertService.ACTION_DONE -> {
                     val summary = intent.getStringExtra(ConvertService.EXTRA_SUMMARY).orEmpty()
-                    AlertDialog.Builder(this@M3u8BrowserActivity)
+                    val hasError = File(filesDir, ConvertService.ERROR_FILE).exists()
+                    val builder = AlertDialog.Builder(this@M3u8BrowserActivity)
                         .setTitle("转换完成")
                         .setMessage(summary)
                         .setPositiveButton(android.R.string.ok, null)
-                        .show()
+                    if (hasError) {
+                        builder.setNeutralButton("查看日志") { _, _ -> showConvertError() }
+                    }
+                    builder.show()
                     refreshUi()
                 }
             }
@@ -274,6 +278,19 @@ class M3u8BrowserActivity : Activity() {
         countText.text = lines.joinToString("\n")
     }
 
+    private fun showConvertError() {
+        val text = try {
+            File(filesDir, ConvertService.ERROR_FILE).readText(Charsets.UTF_8)
+        } catch (e: Exception) {
+            "日志读取失败：${e.message}"
+        }
+        AlertDialog.Builder(this)
+            .setTitle("转换错误日志")
+            .setMessage(text)
+            .setPositiveButton(android.R.string.ok, null)
+            .show()
+    }
+
     private fun showPath(file: MediaFile) {
         AlertDialog.Builder(this)
             .setTitle(getString(R.string.path_dialog_title))
@@ -296,6 +313,15 @@ class M3u8BrowserActivity : Activity() {
         }
         if (pending.isEmpty()) {
             Toast.makeText(this, getString(R.string.convert_no_candidates), Toast.LENGTH_LONG).show()
+            return
+        }
+        // FFmpegKit 只提供 64 位 so，32 位设备明确告知，避免只看到一句“失败”
+        if (Build.SUPPORTED_ABIS.none { it == "arm64-v8a" || it == "x86_64" }) {
+            Toast.makeText(
+                this,
+                "当前设备是 32 位，FFmpeg 转换不可用（仍可正常播放）",
+                Toast.LENGTH_LONG
+            ).show()
             return
         }
         if (pending.size < files.size) {
@@ -354,6 +380,11 @@ class M3u8BrowserActivity : Activity() {
         deleteSource: Boolean,
         deleteSegments: Boolean
     ) {
+        try {
+            File(filesDir, ConvertService.ERROR_FILE).delete()
+        } catch (e: Exception) {
+            // 清不掉旧日志不影响转换
+        }
         val intent = Intent(this, ConvertService::class.java)
             .putStringArrayListExtra(
                 ConvertService.EXTRA_INPUTS,

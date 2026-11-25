@@ -17,18 +17,40 @@ object SegmentResolver {
 
     private val uriAttr = Regex("URI=\"([^\"]+)\"")
 
-    /** 这份 m3u8 引用到的本地分片绝对路径（含 EXT-X-MAP 初始化段） */
-    fun localSegments(context: Context, file: MediaFile): List<String> {
-        if (file.uri.scheme != "file") return emptyList()
+    data class Inspection(
+        val local: List<String>,
+        val missing: List<String>,
+        val remote: Int
+    )
+
+    /** 这份 m3u8 引用的本地分片绝对路径（含 EXT-X-MAP 初始化段） */
+    fun localSegments(context: Context, file: MediaFile): List<String> = parse(file).first
+
+    /** 转换前体检：分片是否存在、是否其实是个网络播放列表 */
+    fun inspect(context: Context, file: MediaFile): Inspection {
+        val (local, remote) = parse(file)
+        val missing = local.filterNot { path ->
+            try {
+                File(path).exists()
+            } catch (e: Exception) {
+                true
+            }
+        }
+        return Inspection(local, missing, remote)
+    }
+
+    private fun parse(file: MediaFile): Pair<List<String>, Int> {
+        if (file.uri.scheme != "file") return emptyList<String>() to 0
         val source = File(file.path)
-        val base = source.parentFile ?: return emptyList()
+        val base = source.parentFile ?: return emptyList<String>() to 0
         val text = try {
             source.readText(Charsets.UTF_8)
         } catch (e: Exception) {
-            return emptyList()
+            return emptyList<String>() to 0
         }
 
         val result = LinkedHashSet<String>()
+        var remote = 0
         var previousWasVariant = false
         for (raw in text.lineSequence()) {
             val line = raw.trim()
@@ -49,16 +71,18 @@ object SegmentResolver {
 
             if (ref.isNullOrBlank()) continue
             val lower = ref.lowercase()
-            if (lower.startsWith("http://") || lower.startsWith("https://") ||
-                lower.startsWith("data:") || lower.startsWith("blob:")
-            ) continue
+            if (lower.startsWith("http://") || lower.startsWith("https://")) {
+                remote++
+                continue
+            }
+            if (lower.startsWith("data:") || lower.startsWith("blob:")) continue
             if (lower.endsWith(".m3u8") || lower.endsWith(".m3u")) continue
 
             val path = resolve(base, ref) ?: continue
             if (path == file.path) continue
             result.add(path)
         }
-        return result.toList()
+        return result.toList() to remote
     }
 
     private fun resolve(base: File, ref: String): String? {

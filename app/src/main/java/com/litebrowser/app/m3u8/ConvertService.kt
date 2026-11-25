@@ -44,6 +44,9 @@ class ConvertService : Service() {
         private const val CHANNEL = "convert"
         private const val NOTIFY_ID = 2026
 
+        /** 最近一次转换失败的错误日志，界面上可以查看 */
+        const val ERROR_FILE = "convert_error.txt"
+
         /** 输出与源文件同目录，仅改扩展名；界面也用它提前判断目标是否已存在 */
         fun outputPathOf(input: String): String {
             val source = File(input)
@@ -92,7 +95,21 @@ class ConvertService : Service() {
         val deleteSource = intent?.getBooleanExtra(EXTRA_DELETE_SOURCE, false) == true
         val deleteSegments = deleteSource &&
             intent?.getBooleanExtra(EXTRA_DELETE_SEGMENTS, false) == true
-        worker.post { convertAll(inputs, deleteSource, deleteSegments) }
+        worker.post {
+            try {
+                convertAll(inputs, deleteSource, deleteSegments)
+            } catch (e: Throwable) {
+                // 任何意外都要把状态复位，否则之后每次都会被“已有任务”挡住
+                lastError = "转换任务异常：" + e.toString()
+                broadcast(ACTION_DONE, false, summary = lastError)
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
+            } finally {
+                running = false
+                current = 0
+                total = 0
+            }
+        }
         return START_NOT_STICKY
     }
 
@@ -128,11 +145,46 @@ class ConvertService : Service() {
                 continue
             }
 
+            val sourceItem = MediaFile(
+                name = label,
+                path = input,
+                size = sourceSize,
+                uri = Uri.fromFile(source),
+                lastModified = sourceMtime
+            )
+            // 先体检分片：只下到 m3u8 列表、或本身就是网络流，是最常见的“转换失败”原因
+            val inspection = SegmentResolver.inspect(applicationContext, sourceItem)
+            if (inspection.local.isEmpty() && inspection.remote > 0) {
+                failed.add("$label（是网络播放列表，分片不在本地）")
+                continue
+            }
+            if (inspection.local.isNotEmpty() && inspection.missing.size == inspection.local.size) {
+                failed.add("$label（分片不在本地，可能只下载了 m3u8 列表）")
+                continue
+            }
+            if (inspection.missing.isNotEmpty()) {
+                failed.add(
+                    "$label（缺少 ${inspection.missing.size}/${inspection.local.size} 个分片，无法完整转换）"
+                )
+                continue
+            }
+
             // 标准 HLS(TS) 的 AAC 需要 aac_adtstoasc；少数非 AAC 音轨会失败，降级重试一次
-            var ok = runFFmpeg(input, out.absolutePath, withAacBsf = true)
+            var ok = tryConvert(input, out, withAacBsf = true)
+            if (!ok) ok = tryConvert(input, out, withAacBsf = false)
+
+            // 仍失败就把输出先写到应用专属目录，再拷回目标目录。
+            // 绕开 Android 11+ 上原生代码对公共目录的写入限制，也能区分"写不了"还是"转不了"。
             if (!ok) {
-                if (out.exists()) out.delete()
-                ok = runFFmpeg(input, out.absolutePath, withAacBsf = false)
+                val tempDir = (getExternalFilesDir("convert") ?: File(cacheDir, "convert"))
+                    .apply { mkdirs() }
+                val temp = File(tempDir, "tmp_${System.currentTimeMillis()}.mp4")
+                var tempOk = tryConvert(input, temp, withAacBsf = true)
+                if (!tempOk) tempOk = tryConvert(input, temp, withAacBsf = false)
+                if (tempOk) {
+                    ok = copyFile(temp, out)
+                    temp.delete()
+                }
             }
 
             if (ok && out.exists() && out.length() > 0L) {
@@ -143,13 +195,6 @@ class ConvertService : Service() {
                 if (deleteSource) {
                     // 必须在删源之前解析它引用了哪些分片
                     val segments = if (deleteSegments) {
-                        val sourceItem = MediaFile(
-                            name = label,
-                            path = input,
-                            size = sourceSize,
-                            uri = Uri.fromFile(source),
-                            lastModified = sourceMtime
-                        )
                         SegmentResolver.releasableSegments(applicationContext, sourceItem)
                     } else emptyList()
                     val segmentBytes = SegmentResolver.sizeOf(segments)
@@ -180,7 +225,31 @@ class ConvertService : Service() {
             parts.add("已删除 ${removed.size} 个源 m3u8，释放约 $freed")
         }
         if (skipped.isNotEmpty()) parts.add("跳过 ${skipped.size} 个：${skipped.joinToString("、")}")
-        if (failed.isNotEmpty()) parts.add("失败 ${failed.size} 个：${failed.joinToString("、")}")
+        if (failed.isNotEmpty()) {
+            parts.add("失败 ${failed.size} 个：${failed.joinToString("、")}")
+            if (lastError.isNotBlank()) {
+                val diagnostic = buildString {
+                    append("ABI=").append(Build.SUPPORTED_ABIS.joinToString(",")).append('\n')
+                    append("SDK=").append(Build.VERSION.SDK_INT).append('\n')
+                    append(
+                        try {
+                            val version = FFmpegKit.execute("-version")
+                            "FFmpeg 可执行：" +
+                                (version.output?.lineSequence()?.firstOrNull() ?: "无输出")
+                        } catch (e: Throwable) {
+                            "FFmpeg 无法执行：" + e.toString()
+                        }
+                    ).append("\n\n")
+                    append(lastError)
+                }
+                try {
+                    File(filesDir, ERROR_FILE).writeText(diagnostic, Charsets.UTF_8)
+                } catch (e: Exception) {
+                    // 日志写不出来不影响主流程
+                }
+                parts.add("错误：${lastError.takeLast(400)}")
+            }
+        }
         val summary = parts.joinToString("\n").ifEmpty { "没有需要转换的文件" }
 
         running = false
@@ -191,9 +260,23 @@ class ConvertService : Service() {
         stopSelf()
     }
 
+    private var lastError: String = ""
+
+    private fun tryConvert(input: String, out: File, withAacBsf: Boolean): Boolean {
+        if (out.exists()) out.delete()
+        val ok = runFFmpeg(input, out.absolutePath, withAacBsf)
+        return ok && out.exists() && out.length() > 0L
+    }
+
     private fun runFFmpeg(input: String, output: String, withAacBsf: Boolean): Boolean {
         val args = ArrayList<String>()
+        args += "-hide_banner"
         args += "-n"                 // 不覆盖已有文件，界面已提前跳过
+        // 本地 HLS 的分片是 file:，显式放行；部分 FFmpeg 版本默认白名单不含 file
+        args += "-protocol_whitelist"
+        args += "file,crypto,data,http,https,tcp,tls"
+        args += "-allowed_extensions"
+        args += "ALL"
         args += "-i"
         args += input
         args += "-map"
@@ -206,14 +289,53 @@ class ConvertService : Service() {
             args += "-bsf:a"
             args += "aac_adtstoasc"
         }
+        args += "-avoid_negative_ts"
+        args += "make_zero"
         args += "-movflags"
         args += "+faststart"
         args += output
         return try {
             val session = FFmpegKit.executeWithArguments(args.toTypedArray())
-            ReturnCode.isSuccess(session.returnCode)
+            val ok = ReturnCode.isSuccess(session.returnCode)
+            if (!ok) {
+                lastError = buildString {
+                    append("returnCode=").append(session.returnCode).append('\n')
+                    append("arguments=").append(args.joinToString(" ")).append('\n')
+                    append(session.output?.takeLast(3000) ?: "（FFmpeg 没有输出日志）")
+                }
+            }
+            ok
         } catch (e: Throwable) {
             // 32 位机型没有对应 so 时会抛 UnsatisfiedLinkError，不能让它冲垮服务
+            lastError = buildString {
+                append("FFmpegKit 调用异常：").append(e.toString()).append('\n')
+                append("arguments=").append(args.joinToString(" "))
+            }
+            false
+        }
+    }
+
+    private fun copyFile(from: File, to: File): Boolean {
+        return try {
+            to.parentFile?.mkdirs()
+            from.inputStream().use { input ->
+                to.outputStream().use { output ->
+                    val buffer = ByteArray(1024 * 1024)
+                    while (true) {
+                        val read = input.read(buffer)
+                        if (read <= 0) break
+                        output.write(buffer, 0, read)
+                    }
+                    output.flush()
+                }
+            }
+            true
+        } catch (e: Exception) {
+            lastError = "临时文件拷贝到目标目录失败：" + e.toString()
+            try {
+                if (to.exists()) to.delete()
+            } catch (ignored: Exception) {
+            }
             false
         }
     }
