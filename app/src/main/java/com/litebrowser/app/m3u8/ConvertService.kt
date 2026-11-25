@@ -30,11 +30,12 @@ class ConvertService : Service() {
     companion object {
         const val EXTRA_INPUTS = "inputs"
         const val EXTRA_DELETE_SOURCE = "deleteSource"
-        const val EXTRA_DELETE_SEGMENTS = "deleteSegments"
         const val ACTION_PROGRESS = "com.litebrowser.app.convert.PROGRESS"
         const val ACTION_DONE = "com.litebrowser.app.convert.DONE"
         const val ACTION_REMOVED = "com.litebrowser.app.convert.REMOVED"
         const val EXTRA_PATH = "path"
+        /** 本次成功生成的所有 mp4 路径，界面收到后直接加入列表，无需再扫描 */
+        const val EXTRA_OUTPUTS = "outputs"
         const val EXTRA_CURRENT = "current"
         const val EXTRA_TOTAL = "total"
         const val EXTRA_NAME = "name"
@@ -93,8 +94,8 @@ class ConvertService : Service() {
         startForeground(NOTIFY_ID, notification("准备转换 ${inputs.size} 个文件", 0, inputs.size))
 
         val deleteSource = intent?.getBooleanExtra(EXTRA_DELETE_SOURCE, false) == true
-        val deleteSegments = deleteSource &&
-            intent?.getBooleanExtra(EXTRA_DELETE_SEGMENTS, false) == true
+        // 删源必清理独占分片，不再单独控制
+        val deleteSegments = deleteSource
         worker.post {
             try {
                 convertAll(inputs, deleteSource, deleteSegments)
@@ -122,6 +123,8 @@ class ConvertService : Service() {
         val failed = ArrayList<String>()
         val skipped = ArrayList<String>()
         val removed = ArrayList<String>()
+        /** 转换成功的输出路径，结束时一次广播给界面，避免漏扫 */
+        val outputs = ArrayList<String>()
         var releasedBytes = 0L
         var removedSourceBytes = 0L
 
@@ -196,6 +199,7 @@ class ConvertService : Service() {
             if (ok && out.exists() && out.length() > 0L) {
                 // 先记录再决定是否删源文件：即使删失败，下次也不会重复转换
                 ConvertStore.mark(applicationContext, input, out.absolutePath, sourceSize, sourceMtime)
+                outputs.add(out.absolutePath)
                 succeeded.add("${out.name}（${formatSize(out.length())}）")
 
                 if (deleteSource) {
@@ -261,7 +265,7 @@ class ConvertService : Service() {
         running = false
         current = 0
         total = 0
-        broadcast(ACTION_DONE, succeeded.isNotEmpty(), summary = summary)
+        broadcast(ACTION_DONE, succeeded.isNotEmpty(), summary = summary, outputs = outputs)
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
@@ -485,7 +489,8 @@ class ConvertService : Service() {
         totalValue: Int = total,
         name: String = "",
         summary: String = "",
-        path: String = ""
+        path: String = "",
+        outputs: List<String> = emptyList()
     ) {
         val intent = Intent(action).setPackage(packageName)
         intent.putExtra(EXTRA_OK, ok)
@@ -494,6 +499,7 @@ class ConvertService : Service() {
         intent.putExtra(EXTRA_NAME, name)
         intent.putExtra(EXTRA_SUMMARY, summary)
         intent.putExtra(EXTRA_PATH, path)
+        intent.putStringArrayListExtra(EXTRA_OUTPUTS, ArrayList(outputs))
         sendBroadcast(intent)
     }
 

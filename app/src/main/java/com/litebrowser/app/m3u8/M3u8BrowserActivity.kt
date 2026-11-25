@@ -50,9 +50,8 @@ class M3u8BrowserActivity : Activity() {
     private var lastStatus = ""
     private var convertedKeys: Set<String> = emptySet()
     private var pendingDelete: List<MediaFile> = emptyList()
-    private var pendingConvert: Triple<List<MediaFile>, Boolean, Boolean>? = null
+    private var pendingConvert: Pair<List<MediaFile>, Boolean>? = null
     private lateinit var deleteSourceCheck: CheckBox
-    private lateinit var deleteSegmentsCheck: CheckBox
 
     private val filterButtons: Array<Button> by lazy {
         arrayOf(
@@ -85,6 +84,35 @@ class M3u8BrowserActivity : Activity() {
                 }
                 ConvertService.ACTION_DONE -> {
                     val summary = intent.getStringExtra(ConvertService.EXTRA_SUMMARY).orEmpty()
+                    // 转换出的 mp4 直接进列表并落盘缓存，不必再靠"扫描新增"去找
+                    val outputs = intent.getStringArrayListExtra(ConvertService.EXTRA_OUTPUTS).orEmpty()
+                    if (outputs.isNotEmpty()) {
+                        val known = cachedFiles.map { it.path }.toHashSet()
+                        val added = ArrayList<MediaFile>()
+                        for (path in outputs) {
+                            val f = File(path)
+                            if (f.exists() && f.length() > 0L && path !in known) {
+                                added.add(
+                                    MediaFile(
+                                        name = f.name,
+                                        path = path,
+                                        size = f.length(),
+                                        uri = Uri.fromFile(f),
+                                        lastModified = f.lastModified()
+                                    )
+                                )
+                            }
+                        }
+                        if (added.isNotEmpty()) {
+                            cachedFiles = (cachedFiles + added)
+                                .distinctBy { it.uri.toString() }
+                                .sortedBy { it.name.lowercase() }
+                            ScanStore.save(
+                                this@M3u8BrowserActivity,
+                                ScanStore.Snapshot(cachedFiles, lastScan, savedTreeUri)
+                            )
+                        }
+                    }
                     val hasError = File(filesDir, ConvertService.ERROR_FILE).exists()
                     val builder = AlertDialog.Builder(this@M3u8BrowserActivity)
                         .setTitle("转换完成")
@@ -107,7 +135,6 @@ class M3u8BrowserActivity : Activity() {
         private const val REQ_WRITE = 1004
         private const val PREFS = "litebrowser_settings"
         private const val KEY_DELETE_SOURCE = "delete_source_after_convert"
-        private const val KEY_DELETE_SEGMENTS = "delete_segments_after_convert"
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -124,13 +151,6 @@ class M3u8BrowserActivity : Activity() {
         deleteSourceCheck.setOnCheckedChangeListener { _, checked ->
             getSharedPreferences(PREFS, MODE_PRIVATE).edit()
                 .putBoolean(KEY_DELETE_SOURCE, checked).apply()
-        }
-        deleteSegmentsCheck = findViewById(R.id.deleteSegmentsCheck)
-        deleteSegmentsCheck.isChecked = getSharedPreferences(PREFS, MODE_PRIVATE)
-            .getBoolean(KEY_DELETE_SEGMENTS, false)
-        deleteSegmentsCheck.setOnCheckedChangeListener { _, checked ->
-            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
-                .putBoolean(KEY_DELETE_SEGMENTS, checked).apply()
         }
 
         adapter = FileAdapter(
@@ -332,31 +352,31 @@ class M3u8BrowserActivity : Activity() {
         }
 
         val deleteSource = deleteSourceCheck.isChecked
-        val deleteSegments = deleteSource && deleteSegmentsCheck.isChecked
+        // 删源即清理其独占分片：两个开关合并，不再单独控制
         if (deleteSource && !hasWritePermission()) {
             // 先把待办存起来，授权后直接继续，不用用户再点一次
-            pendingConvert = Triple(pending, deleteSource, deleteSegments)
+            pendingConvert = pending to deleteSource
             requestWritePermission()
             Toast.makeText(this, "需要先授予存储写入权限才能删除源文件", Toast.LENGTH_LONG).show()
             return
         }
 
-        confirmConvert(pending, deleteSource, deleteSegments)
+        confirmConvert(pending, deleteSource)
     }
 
     /** 转换确认：这里不估算释放空间，解析分片很慢会让按钮点了半天才弹窗 */
-    private fun confirmConvert(pending: List<MediaFile>, deleteSource: Boolean, deleteSegments: Boolean) {
-        val messageRes = when {
-            deleteSegments -> R.string.convert_confirm_delete_segments
-            deleteSource -> R.string.convert_confirm_delete
-            else -> R.string.convert_confirm_keep
+    private fun confirmConvert(pending: List<MediaFile>, deleteSource: Boolean) {
+        val messageRes = if (deleteSource) {
+            R.string.convert_confirm_delete_segments
+        } else {
+            R.string.convert_confirm_keep
         }
         AlertDialog.Builder(this)
             .setTitle(getString(R.string.batch_convert))
             .setMessage(getString(messageRes, pending.size))
             .setNegativeButton(getString(R.string.cancel), null)
             .setPositiveButton(getString(R.string.batch_convert)) { _, _ ->
-                startConvert(pending, deleteSource, deleteSegments)
+                startConvert(pending, deleteSource)
             }
             .show()
     }
@@ -374,11 +394,7 @@ class M3u8BrowserActivity : Activity() {
         }
     }
 
-    private fun startConvert(
-        pending: List<MediaFile>,
-        deleteSource: Boolean,
-        deleteSegments: Boolean
-    ) {
+    private fun startConvert(pending: List<MediaFile>, deleteSource: Boolean) {
         try {
             File(filesDir, ConvertService.ERROR_FILE).delete()
         } catch (e: Exception) {
@@ -390,7 +406,6 @@ class M3u8BrowserActivity : Activity() {
                 ArrayList(pending.map { it.path })
             )
             .putExtra(ConvertService.EXTRA_DELETE_SOURCE, deleteSource)
-            .putExtra(ConvertService.EXTRA_DELETE_SEGMENTS, deleteSegments)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(intent)
         } else {
@@ -410,20 +425,25 @@ class M3u8BrowserActivity : Activity() {
             Toast.makeText(this, "需要先授予存储写入权限才能删除", Toast.LENGTH_LONG).show()
             return
         }
+        // 先立刻弹窗，按钮点了马上有反应；释放大小放到后台算，算完再更新文案。
+        // 之前是等算完才弹窗，分片/同目录 m3u8 多时会让人以为卡死。
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(getString(R.string.delete))
+            .setMessage(getString(R.string.delete_confirm_calculating, files.size))
+            .setNegativeButton(getString(R.string.cancel), null)
+            .setPositiveButton(getString(R.string.delete)) { _, _ -> deleteFiles(files) }
+            .show()
         // 删除的目的就是腾空间：无论开关如何，都连带清理独占分片
         estimateRelease(files) { bytes ->
-            AlertDialog.Builder(this@M3u8BrowserActivity)
-                .setTitle(getString(R.string.delete))
-                .setMessage(
+            if (dialog.isShowing) {
+                dialog.setMessage(
                     getString(
                         R.string.delete_confirm_with_size,
                         files.size,
                         SegmentResolver.formatSize(bytes)
                     )
                 )
-                .setNegativeButton(getString(R.string.cancel), null)
-                .setPositiveButton(getString(R.string.delete)) { _, _ -> deleteFiles(files) }
-                .show()
+            }
         }
     }
 
@@ -550,7 +570,7 @@ class M3u8BrowserActivity : Activity() {
                 } else {
                     pendingConvert?.let {
                         pendingConvert = null
-                        confirmConvert(it.first, it.second, it.third)
+                        confirmConvert(it.first, it.second)
                     }
                 }
             } else {
@@ -576,7 +596,7 @@ class M3u8BrowserActivity : Activity() {
                 } else if (pendingConvert != null) {
                     val job = pendingConvert!!
                     pendingConvert = null
-                    confirmConvert(job.first, job.second, job.third)
+                    confirmConvert(job.first, job.second)
                 } else if (hasStoragePermission()) {
                     startScan(incremental = true)
                 } else {
@@ -690,14 +710,8 @@ class M3u8BrowserActivity : Activity() {
     ) {
         if (dir == null || depth > 12) return
 
-        if (since > 0L) {
-            val modified = try {
-                dir.lastModified()
-            } catch (e: Exception) {
-                0L
-            }
-            if (modified in 1 until since) return
-        }
+        // 不做目录 mtime 剪枝，原因同 Scanner：深层新增文件不会更新祖先目录 mtime，
+        // 剪枝会漏掉新转出的 mp4。文件级去重（knownUris）已足够。
 
         for (child in dir.listFiles()) {
             try {

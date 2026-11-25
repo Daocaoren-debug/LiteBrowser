@@ -78,6 +78,50 @@ object HlsDecryptor {
         }
     }
 
+    /** 只解密第一个分片，供缩略图抽帧使用，避免为一张图解完整部视频 */
+    fun decryptFirst(context: Context, info: SegmentResolver.PlaylistInfo, workDir: File): Result {
+        val first = info.segments.firstOrNull()
+            ?: return Result(emptyList(), "播放列表里没有本地分片")
+        val keyUri = info.keyUri
+            ?: return Result(emptyList(), "播放列表里没有找到密钥地址")
+        val key = try {
+            loadKey(keyUri)
+        } catch (e: Exception) {
+            return Result(emptyList(), "读取密钥失败：${e.message}")
+        }
+        if (key.size != 16) {
+            return Result(emptyList(), "密钥长度不是 16 字节（实际 ${key.size}）")
+        }
+        val iv = if (info.keyIv == null) {
+            sequenceIv(info.mediaSequence)
+        } else {
+            parseHex(info.keyIv!!)
+                ?: return Result(emptyList(), "IV 格式无法识别：${info.keyIv}")
+        }
+        return try {
+            workDir.mkdirs()
+            val target = File(workDir, "first.ts")
+            val cipher = Cipher.getInstance("AES/CBC/PKCS7Padding")
+            cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(key, "AES"), IvParameterSpec(iv))
+            FileInputStream(first).use { fileInput ->
+                CipherInputStream(fileInput, cipher).use { decrypted ->
+                    FileOutputStream(target).use { fileOutput ->
+                        val buffer = ByteArray(1024 * 1024)
+                        while (true) {
+                            val read = decrypted.read(buffer)
+                            if (read <= 0) break
+                            fileOutput.write(buffer, 0, read)
+                        }
+                        fileOutput.flush()
+                    }
+                }
+            }
+            Result(listOf(target.absolutePath))
+        } catch (e: Exception) {
+            Result(emptyList(), "解密首个分片失败：${e.message}")
+        }
+    }
+
     fun cleanup(paths: Collection<String>, workDir: File) {
         paths.forEach { try { File(it).delete() } catch (e: Exception) {} }
         try {
