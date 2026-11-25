@@ -19,7 +19,7 @@
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
     <!-- 批量转换时以后台服务运行，避免切到后台就被杀掉 -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROCESSING" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <!-- 播放时持有唤醒锁 -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
@@ -85,7 +85,7 @@
         <service
             android:name=".m3u8.ConvertService"
             android:exported="false"
-            android:foregroundServiceType="mediaProcessing" />
+            android:foregroundServiceType="dataSync" />
     </application>
 
 </manifest>
