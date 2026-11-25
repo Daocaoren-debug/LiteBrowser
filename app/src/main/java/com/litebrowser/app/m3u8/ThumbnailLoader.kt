@@ -118,7 +118,7 @@ object ThumbnailLoader {
             val work = File(context.cacheDir, "thumb_dec_${System.currentTimeMillis()}")
             val result = HlsDecryptor.decryptFirst(context, info, work)
             try {
-                result.path?.let { ffmpegFrame(context, it) }?.let { return it }
+                result.paths.firstOrNull()?.let { ffmpegFrame(context, it) }?.let { return it }
             } finally {
                 HlsDecryptor.cleanup(result.paths, work)
             }
