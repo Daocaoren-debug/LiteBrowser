@@ -59,22 +59,27 @@ object HlsDecryptor {
                 continue
             }
             val uri = keySpec.keyUri!!
-            val key = keyCache[uri] ?: run {
-                when {
-                    keyErrors.containsKey(uri) -> {
-                        failures.add("第 ${index + 1} 段：$uri ${keyErrors[uri]}")
-                        skipped.add(index + 1)
-                        continue
-                    }
-                    else -> try {
-                        loadKey(uri).also { keyCache[uri] = it }
-                    } catch (e: Exception) {
-                        val message = "读取密钥失败：${e.message}"
-                        keyErrors[uri] = message
-                        failures.add("第 ${index + 1} 段：$uri $message")
-                        skipped.add(index + 1)
-                        continue
-                    }
+            // 这把 key 上次已经读失败，本段同样跳过（不能在 inline lambda 里 continue）
+            val knownError = keyErrors[uri]
+            if (knownError != null) {
+                failures.add("第 ${index + 1} 段：$uri $knownError")
+                skipped.add(index + 1)
+                continue
+            }
+            val key: ByteArray
+            val cached = keyCache[uri]
+            if (cached != null) {
+                key = cached
+            } else {
+                try {
+                    key = loadKey(uri)
+                    keyCache[uri] = key
+                } catch (e: Exception) {
+                    val message = "读取密钥失败：${e.message}"
+                    keyErrors[uri] = message
+                    failures.add("第 ${index + 1} 段：$uri $message")
+                    skipped.add(index + 1)
+                    continue
                 }
             }
             if (key.size != 16) {
@@ -85,14 +90,17 @@ object HlsDecryptor {
                 continue
             }
 
-            val iv = if (keySpec.iv == null) {
-                sequenceIv(keySpec.sequence)
+            val iv: ByteArray
+            if (keySpec.iv == null) {
+                iv = sequenceIv(keySpec.sequence)
             } else {
-                parseHex(keySpec.iv!!) ?: run {
+                val parsed = parseHex(keySpec.iv!!)
+                if (parsed == null) {
                     failures.add("第 ${index + 1} 段：IV 格式无法识别：${keySpec.iv}")
                     skipped.add(index + 1)
                     continue
                 }
+                iv = parsed
             }
 
             val target = File(workDir, String.format("seg_%06d.ts", index))
