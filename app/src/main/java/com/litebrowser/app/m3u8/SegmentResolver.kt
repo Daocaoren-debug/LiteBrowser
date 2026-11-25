@@ -21,6 +21,14 @@ object SegmentResolver {
         Regex("$name=\"([^\"]+)\"", RegexOption.IGNORE_CASE)
             .find(line)?.groupValues?.getOrNull(1)
 
+    /** 某个分片实际使用的加密参数；keyUri 为 null 表示这一段没有加密 */
+    data class SegmentKey(
+        val keyUri: String?,
+        val iv: String?,
+        /** 该分片的 media sequence number，未显式给 IV 时用它推算 */
+        val sequence: Long
+    )
+
     data class PlaylistInfo(
         /** 按 m3u8 顺序排列的本地分片绝对路径（含 EXT-X-MAP 初始化段） */
         val segments: List<String>,
@@ -34,12 +42,19 @@ object SegmentResolver {
         val byteRange: Boolean,
         /** 主播放列表（引用的下一层还是 m3u8） */
         val master: Boolean,
-        /** AES-128 密钥地址（URI），已按 m3u8 所在目录解析成绝对路径或网络地址 */
+        /** 第一个 AES-128 密钥地址（URI），保留兼容旧调用 */
         val keyUri: String? = null,
-        /** #EXT-X-KEY 的 IV，0x 开头的十六进制 */
+        /** 第一个 #EXT-X-KEY 的 IV，0x 开头的十六进制 */
         val keyIv: String? = null,
         /** #EXT-X-MEDIA-SEQUENCE，未指定 IV 时用它推算 */
-        val mediaSequence: Long = 0L
+        val mediaSequence: Long = 0L,
+        /**
+         * 与 segments 一一对应：每个分片自己的 key/IV。
+         * 播放列表可以在中途用新的 #EXT-X-KEY 换密钥，只用第一个 key 解全部会 BAD_DECRYPT。
+         */
+        val segmentKeys: List<SegmentKey?> = emptyList(),
+        /** 存在 AES-128 之外的加密方式（SAMPLE-AES / DRM），本实现不支持 */
+        val unsupportedKey: Boolean = false
     ) {
         /** 分片文件名没有扩展名时，FFmpeg 的 HLS demuxer 会直接拒绝 */
         val hasExtensionlessSegment: Boolean
@@ -76,7 +91,9 @@ object SegmentResolver {
             master = false,
             keyUri = null,
             keyIv = null,
-            mediaSequence = 0L
+            mediaSequence = 0L,
+            segmentKeys = emptyList(),
+            unsupportedKey = false
         )
         if (file.uri.scheme != "file") return empty
         val source = File(file.path)
@@ -88,6 +105,8 @@ object SegmentResolver {
         }
 
         val result = LinkedHashSet<String>()
+        /** 与 result 同步：每个分片对应的密钥（换 key 后不同） */
+        val keys = ArrayList<SegmentKey?>()
         var remote = 0
         var encrypted = false
         var fmp4 = false
@@ -98,32 +117,54 @@ object SegmentResolver {
         var mediaSequence = 0L
         var previousWasVariant = false
 
+        // 当前生效的 key：遇到新的 #EXT-X-KEY 就替换，直到下一条
+        var activeKey: SegmentKey? = null
+        // 分片计数，用来在没显式 IV 时按 mediaSequence + 序号推算 IV
+        var segmentIndex = 0L
+        // 是否出现不支持的加密方式（SAMPLE-AES / DRM）
+        var unsupportedKey = false
+
         for (raw in text.lineSequence()) {
             val line = raw.trim()
             if (line.isEmpty()) continue
 
             if (line.startsWith("#EXT-X-KEY:", ignoreCase = true)) {
                 val method = attr(line, "METHOD") ?: ""
-                if (!method.equals("NONE", ignoreCase = true)) {
-                    encrypted = true
-                    // 只取第一个可用的 AES-128 密钥；identity 之后可能还有 DRM 的 KEYFORMAT，跳过
-                    if (keyUri == null &&
-                        (method.equals("AES-128", ignoreCase = true) || method.isEmpty())
-                    ) {
+                val format = attr(line, "KEYFORMAT") ?: "identity"
+                // 同一位置可能有多条 KEY（identity + DRM），只认 identity 的 AES-128
+                val isIdentity = format.equals("identity", ignoreCase = true) ||
+                    format.equals("com.apple.streamingkeydelivery", ignoreCase = true)
+                when {
+                    method.equals("NONE", ignoreCase = true) -> {
+                        activeKey = null // METHOD=NONE 之后的分片不加密
+                    }
+                    (method.equals("AES-128", ignoreCase = true) || method.isEmpty()) && isIdentity -> {
                         val rawUri = attr(line, "URI")
-                        keyIv = attr(line, "IV")
-                        keyUri = when {
+                        val uri = when {
                             rawUri.isNullOrBlank() -> null
                             rawUri.startsWith("http://", true) ||
                                 rawUri.startsWith("https://", true) -> rawUri
                             else -> resolve(base, rawUri)
                         }
+                        if (uri != null) {
+                            val iv = attr(line, "IV")
+                            activeKey = SegmentKey(uri, iv, mediaSequence + segmentIndex)
+                            encrypted = true
+                            if (keyUri == null) {
+                                keyUri = uri
+                                keyIv = iv
+                            }
+                        }
                     }
+                    else -> unsupportedKey = true
                 }
             }
             if (line.startsWith("#EXT-X-MEDIA-SEQUENCE:", ignoreCase = true)) {
                 val value = line.substringAfter(":", "").trim().toLongOrNull()
-                if (value != null) mediaSequence = value
+                if (value != null) {
+                    mediaSequence = value
+                    // 已记录的分片若没有显式 IV，其序号基于当时的 mediaSequence，保持原值不动
+                }
             }
             if (line.startsWith("#EXT-X-BYTERANGE:", ignoreCase = true)) byteRange = true
             if (line.startsWith("#EXT-X-STREAM-INF", ignoreCase = true) ||
@@ -156,6 +197,10 @@ object SegmentResolver {
             val path = resolve(base, ref) ?: continue
             if (path == file.path) continue
             result.add(path)
+            // 记录这一段用的 key：IV 按该段自己的序号算，显式 IV 优先
+            val seq = mediaSequence + segmentIndex
+            keys.add(activeKey?.copy(sequence = seq))
+            segmentIndex++
         }
         return PlaylistInfo(
             segments = result.toList(),
@@ -167,7 +212,9 @@ object SegmentResolver {
             master = master,
             keyUri = keyUri,
             keyIv = keyIv,
-            mediaSequence = mediaSequence
+            mediaSequence = mediaSequence,
+            segmentKeys = keys.toList(),
+            unsupportedKey = unsupportedKey
         )
     }
 

@@ -113,14 +113,15 @@ object ThumbnailLoader {
         if (info.fmp4) return null
         val first = info.segments.firstOrNull() ?: return null
 
-        if (info.encrypted && info.keyUri != null) {
-            // 密文分片直接抽帧是花屏，先解密第一段
+        val firstKey = info.segmentKeys.firstOrNull()
+        if (firstKey?.keyUri != null) {
+            // 第一段是密文，直接抽帧是花屏，先解密第一段
             val work = File(context.cacheDir, "thumb_dec_${System.currentTimeMillis()}")
             val result = HlsDecryptor.decryptFirst(context, info, work)
             try {
                 result.paths.firstOrNull()?.let { ffmpegFrame(context, it) }?.let { return it }
             } finally {
-                HlsDecryptor.cleanup(result.paths, work)
+                HlsDecryptor.cleanup(result, work)
             }
         } else {
             // 系统解码器便宜先试；无扩展名 TS 一般会失败，再交给 FFmpeg

@@ -181,6 +181,7 @@ class ConvertService : Service() {
                 continue
             }
 
+            partialNote = ""
             var ok = attemptAll(input, out, info)
 
             // 仍失败就把输出先写到应用专属目录，再拷回目标目录。
@@ -200,7 +201,10 @@ class ConvertService : Service() {
                 // 先记录再决定是否删源文件：即使删失败，下次也不会重复转换
                 ConvertStore.mark(applicationContext, input, out.absolutePath, sourceSize, sourceMtime)
                 outputs.add(out.absolutePath)
-                succeeded.add("${out.name}（${formatSize(out.length())}）")
+                succeeded.add(
+                    "${out.name}（${formatSize(out.length())}）" +
+                        if (partialNote.isNotBlank()) "，$partialNote" else ""
+                )
 
                 if (deleteSource) {
                     // 必须在删源之前解析它引用了哪些分片
@@ -271,6 +275,8 @@ class ConvertService : Service() {
     }
 
     private var lastError: String = ""
+    /** 部分分片解密失败被跳过时，记在这里供最终汇总提示 */
+    private var partialNote: String = ""
 
     /**
      * 按优先级尝试：
@@ -291,17 +297,25 @@ class ConvertService : Service() {
         var ok = false
         if (canConcat && info.hasExtensionlessSegment) {
             if (info.encrypted) {
-                // 先把 AES-128 分片解密成临时 .ts，再拼；密钥读不到就直接报准确原因
+                // 先把 AES-128 分片解密成临时 .ts，再拼。
+                // 每个分片用它自己生效的 key/IV 解；个别段坏了就跳过，其余照常拼。
                 val work = File(cacheDir, "dec_${System.currentTimeMillis()}")
                 val decrypted = HlsDecryptor.decrypt(applicationContext, info, work)
                 if (decrypted.error != null) {
                     lastError = "分片解密失败：" + decrypted.error
                     return false
                 }
+                if (decrypted.skipped.isNotEmpty()) {
+                    partialNote = buildString {
+                        append("跳过 ${decrypted.skipped.size} 个无法解密的分片（第 ")
+                        append(decrypted.skipped.joinToString("、"))
+                        append(" 段，视频可能不完整）")
+                    }
+                }
                 try {
                     ok = tryConcat(out, decrypted.paths)
                 } finally {
-                    HlsDecryptor.cleanup(decrypted.paths, work)
+                    HlsDecryptor.cleanup(decrypted, work)
                 }
             } else {
                 ok = tryConcat(out, info.segments)

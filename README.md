@@ -110,7 +110,9 @@ LiteBrowser/
 - **内置播放器**：ExoPlayer + 自绘控制条。没用 `PlayerView` 自带控制器，因为需求要 ±10 秒快进快退和旋转按钮；`configChanges` 保证横竖屏切换不重建 Activity、播放不断；`DefaultHttpDataSource` 带上 Referer/UA 绕防盗链；`STATE_BUFFERING` 显示转圈、`onPlayerError` 给重试。
 - **无损转换**：`ffmpeg -i in.m3u8 -map 0:v:0 -map 0:a? -c copy -bsf:a aac_adtstoasc -movflags +faststart out.mp4`。只搬流不编码，所以画质不变、体积通常还略小；`aac_adtstoasc` 解决 HLS 里 ADTS AAC 进 MP4 无声；`-movflags +faststart` 移动 moov 到文件头，不增加体积。转换在单线程前台服务里排队，避免多个 FFmpeg 把低端机拖死。
 - **无扩展名分片**：部分下载器把 ts 存成 `xxx.m3u8_contents/0`、`1`…，FFmpeg 的 HLS demuxer 用 `av_match_ext()` 校验扩展名，文件名没有点会直接拒绝（`-allowed_extensions ALL` 也无效）。此时改为按 m3u8 顺序生成 concat 列表，用 `-f concat -safe 0` 拼接分片，绕开该校验。
-- **加密分片**：若 m3u8 带 `#EXT-X-KEY:METHOD=AES-128`，先按规范读密钥（本地或网络）和 IV（显式 IV 或 media sequence 推算），用 `AES/CBC/PKCS7Padding` 流式解密成临时 `.ts`，再走 concat；临时文件转换后即删。fMP4、BYTERANGE 不适用 concat，会给出明确原因。
+- **加密分片**：若 m3u8 带 `#EXT-X-KEY:METHOD=AES-128`，先按规范读密钥（本地或网络）和 IV（显式 IV 或按该段 media sequence 推算），用 `AES/CBC/PKCS7Padding` 流式解密成临时 `.ts`，再走 concat；临时文件转换后即删。
+  - **密钥轮换**：播放列表可在中途用新的 `#EXT-X-KEY` 换 key（key rotation），解密时**每个分片用它自己生效的 key/IV**，而不是统一用第一个 key（否则从换 key 处开始 `BAD_DECRYPT`）。`METHOD=NONE` 段按明文处理。
+  - **单段容错**：个别分片解不开（密钥读不到、数据损坏）会跳过并在结果里提示跳过的段号，其余分片照常拼接，视频可能不完整但可用。SAMPLE-AES / DRM 不支持，会给出明确原因。fMP4、BYTERANGE 不适用 concat。
 
 ## 已知限制（基础版取舍）
 
