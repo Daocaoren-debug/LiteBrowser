@@ -158,7 +158,7 @@ class ConvertService : Service() {
         args += "+faststart"
         args += output
         return try {
-            val session = FFmpegKit.executeWithArguments(*args.toTypedArray())
+            val session = FFmpegKit.executeWithArguments(args.toTypedArray())
             ReturnCode.isSuccess(session.returnCode)
         } catch (e: Throwable) {
             // 32 位机型没有对应 so 时会抛 UnsatisfiedLinkError，不能让它冲垮服务
