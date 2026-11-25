@@ -1,6 +1,6 @@
 # 轻览浏览器 LiteBrowser
 
-一个基于 Android 系统 `WebView` 的**基础版手机浏览器**，为低端机 / 老机型设计。Kotlin 编写，界面/存储/下载/嗅探全部使用系统框架，**唯一第三方依赖是播放内核 Media3(ExoPlayer)**：APK 小、启动快、内存占用低。
+一个基于 Android 系统 `WebView` 的**基础版手机浏览器**，为低端机 / 老机型设计。Kotlin 编写，界面/存储/下载/嗅探全部使用系统框架；第三方依赖只有播放内核 Media3(ExoPlayer)、列表/文档库，以及用于 m3u8→mp4 无损封装的 FFmpeg（min 版）。安装后约 20MB，启动快、运行时内存占用低。
 
 [![Build APK](https://github.com/Daocaoren-debug/LiteBrowser/actions/workflows/build-apk.yml/badge.svg)](https://github.com/Daocaoren-debug/LiteBrowser/actions/workflows/build-apk.yml)
 
@@ -18,7 +18,8 @@ https://github.com/Daocaoren-debug/LiteBrowser/releases/download/latest/LiteBrow
 | --- | --- |
 | 网页浏览 | 地址栏输入网址或关键词（自动百度搜索）；前进 / 后退 / 刷新 / 主页；双指缩放；`target="_blank"` 新窗口链接正常打开 |
 | 网页视频 | HTML5 `<video>` 播放；**点击全屏**时自动接管全屏容器、隐藏系统栏、保持屏幕常亮，返回键退出全屏；支持横屏 |
-| 本地 M3U8 | 从「更多 → 本地 M3U8 播放」进入：扫描手机里的 `.m3u8`/`.m3` 文件（支持 SAF 选目录），带缩略图预览与扫描缓存；播放器**手动横竖屏切换**（点右下角按钮），不跟随重力感应 |
+| 本地视频 | 从「更多 → 本地视频」进入：扫描手机里的 `.m3u8`/`.m3` 与 `.mp4`/`.m4v`（支持 SAF 选目录），带缩略图预览与扫描缓存；支持**全部 / M3U8 / MP4 类型筛选**、**完整路径查看**、**单个删除与批量删除**；播放器**手动横竖屏切换**（点右下角按钮），不跟随重力感应 |
+| M3U8 → MP4 | 单个或批量转换：`-c copy` 无损封装，**不重编码，画质不变、体积不增大**；自动补 `aac_adtstoasc`、加 `+faststart`；输出与源文件同目录；前台服务执行，切后台也继续，通知栏看进度 |
 | 资源嗅探 | 地址栏右侧 🎬 按钮：双路嗅探本页视频（请求拦截 + 页面内 JS 探针），列出候选地址，点一下进内置播放器 |
 | 内置播放器 | ExoPlayer 内核，支持 m3u8 / mp4 / mpd；**±10 秒快进快退**、**进度条拖动**、**长按左右边缘快进快退**、直播流识别、带 Referer 绕过防盗链、失败可重试。嗅探按钮在网页右下角悬浮 |
 | 文件下载 | 交给系统 `DownloadManager`，断点续传、通知栏进度，被杀进程也不中断；底部工具栏可进下载管理 |
@@ -28,7 +29,7 @@ https://github.com/Daocaoren-debug/LiteBrowser/releases/download/latest/LiteBrow
 
 ## 为什么适合低端机
 
-- **依赖极简**：只引入 Media3 播放内核（3 个 aar），没有 Material / OkHttp / 图片库；不需要 dex 分包，低版本机型无类冲突。
+- **依赖克制**：Media3 播放内核（3 个 aar）+ RecyclerView/DocumentFile/Core + FFmpeg min。没有 Material / OkHttp / 图片库 / 网络框架；不需要 dex 分包，低版本机型无类冲突。FFmpeg 的 so 压缩存放，只有真正用到转换时才加载。
 - **系统下载服务**：下载在独立系统进程完成，App 内不做网络与文件 IO，省内存省电。
 - **CursorAdapter 直连 SQLite**：收藏/历史列表不把数据一次性读入内存，长列表滑动不卡。
 - **缓存优先 + 禁止自动播放**：`LOAD_DEFAULT` 省流量；媒体需用户手势才播放，避免后台偷跑 CPU/电量。
@@ -69,7 +70,7 @@ LiteBrowser/
 ├── build.gradle.kts                  # AGP 8.5.2 / Kotlin 1.9.24
 ├── gradle.properties                 # useAndroidX=true（Media3 需要）
 └── app/
-    ├── build.gradle.kts              # 仅 3 个 Media3 aar
+    ├── build.gradle.kts              # Media3 + AndroidX + FFmpegKit min
     ├── proguard-rules.pro
     └── src/main/
         ├── AndroidManifest.xml
@@ -83,6 +84,12 @@ LiteBrowser/
         │   ├── player/
         │   │   ├── MediaSniffer.kt          # 资源嗅探（请求旁听 + JS 探针）
         │   │   └── PlayerActivity.kt        # 内置播放器（ExoPlayer + 自绘控制条）
+        │   ├── m3u8/
+        │   │   ├── M3u8BrowserActivity.kt   # 本地视频库：扫描/筛选/多选/删除
+        │   │   ├── ConvertService.kt        # m3u8→mp4 无损封装（前台服务）
+        │   │   ├── Scanner.kt / ScanStore.kt / MediaFile.kt
+        │   │   ├── FileAdapter.kt / ThumbnailLoader.kt
+        │   │   └── M3u8PlayerActivity.kt    # m3u8 / mp4 播放器
         │   └── webview/
         │       ├── BrowserWebViewClient.kt  # 导航白名单、外部协议、错误回调
         │       └── BrowserWebChromeClient.kt# 进度、视频全屏、新窗口接管
@@ -99,6 +106,7 @@ LiteBrowser/
 - **混合内容**：`MIXED_CONTENT_COMPATIBILITY_MODE`，兼容仍用 http 资源的老站点，同时不完全放开 https 页面。
 - **双路嗅探**：`shouldInterceptRequest` 只旁听、原样返回响应对象（页面行为完全不变），能抓到播放器真实请求的 m3u8 主列表与 mp4 直链；点嗅探按钮时再注入 JS 读 `<video>.currentSrc` 与 `performance` 资源表，补上被 XHR 藏起来的地址。两侧结果按扩展名（mp4/m3u8/mpd/webm/flv/mkv/mov/3gp）去重合并，`.ts` 分片直接丢弃。
 - **内置播放器**：ExoPlayer + 自绘控制条。没用 `PlayerView` 自带控制器，因为需求要 ±10 秒快进快退和旋转按钮；`configChanges` 保证横竖屏切换不重建 Activity、播放不断；`DefaultHttpDataSource` 带上 Referer/UA 绕防盗链；`STATE_BUFFERING` 显示转圈、`onPlayerError` 给重试。
+- **无损转换**：`ffmpeg -i in.m3u8 -map 0:v:0 -map 0:a? -c copy -bsf:a aac_adtstoasc -movflags +faststart out.mp4`。只搬流不编码，所以画质不变、体积通常还略小；`aac_adtstoasc` 解决 HLS 里 ADTS AAC 进 MP4 无声；`-movflags +faststart` 移动 moov 到文件头，不增加体积。转换在单线程前台服务里排队，避免多个 FFmpeg 把低端机拖死。
 
 ## 已知限制（基础版取舍）
 
@@ -107,6 +115,9 @@ LiteBrowser/
 - 部分站点检测 UA 限制第三方浏览器，已做基础 UA 标识，但不保证全兼容。
 - **嗅探不到 blob:/MSE 流**：爱奇艺、腾讯视频、B站正片这类站点把视频解密后喂给 MediaSource，真实地址只存在页面内存里，任何基于 WebView 的浏览器都拿不到可直接播放的链接；DRM（Widevine）内容同理。嗅探适合的是 mp4 直链、普通 HLS（m3u8）站点。
 - m3u8 若是 AES-128 加密且密钥接口需要登录态，播放器会报错，属预期。
+- **转换只支持直接扫描到的本地 m3u8**：通过「选择文件夹」拿到的 `content://` 文件无法直接交给 FFmpeg（相对分片路径也会失效），需改用「全量重扫」。远端 m3u8 的批量转换暂未做。
+- FFmpegKit min 只提供 **64 位 so**（arm64-v8a / x86_64）。32 位机型仍可安装使用浏览器其余功能，但转换会失败并提示。代价是 APK 从约 4.6MB 涨到约 20MB（so 压缩存放，安装时会解压到约 35MB）。
+- 源文件若是 VP9 / AV1 等 MP4 容器不支持的编码，`-c copy` 封装会失败；此时不会重编码（重编码会掉画质、体积也不可控），界面会报失败。
 - Release 构建未内嵌签名配置，需自行生成 keystore；CI 产出的是 debug 签名包。
 
 ## 合规
@@ -115,4 +126,4 @@ LiteBrowser/
 
 ## License
 
-[MIT](LICENSE)
+本项目代码 [MIT](LICENSE)。第三方组件（FFmpegKit / Media3 / AndroidX）见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

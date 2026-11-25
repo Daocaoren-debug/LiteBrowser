@@ -1,3 +1,8 @@
+# FFmpegKit（反射加载 native 库与回调）
+-keep class com.arthenica.ffmpegkit.** { *; }
+-keep class com.arthenica.smartexception.** { *; }
+-dontwarn com.arthenica.ffmpegkit.**
+
 # WebView 相关的 JS 接口若将来添加，需要在此 keep；当前无 JS 注入接口。
 -keepattributes *Annotation*
 -keepattributes JavascriptInterface

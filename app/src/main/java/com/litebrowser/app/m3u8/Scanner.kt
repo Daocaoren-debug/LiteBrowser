@@ -25,6 +25,11 @@ object Scanner {
         return result
     }
 
+    /** 本地视频库关心的类型：HLS 播放列表和常见 MP4 容器 */
+    fun isMediaName(lowerCaseName: String): Boolean =
+        lowerCaseName.endsWith(".m3u8") || lowerCaseName.endsWith(".m3u") ||
+            lowerCaseName.endsWith(".mp4") || lowerCaseName.endsWith(".m4v")
+
     private fun traverse(
         dir: File,
         out: MutableList<MediaFile>,
@@ -58,7 +63,7 @@ object Scanner {
                     traverse(file, out, depth + 1, knownPaths, since)
                 } else {
                     val lower = file.name.lowercase()
-                    if (!lower.endsWith(".m3u8") && !lower.endsWith(".m3u")) continue
+                    if (!isMediaName(lower)) continue
                     val path = file.absolutePath
                     if (path in knownPaths) continue
                     out.add(

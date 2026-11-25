@@ -59,6 +59,11 @@ object ThumbnailLoader {
     }
 
     private fun loadSync(context: Context, file: MediaFile): Bitmap? {
+        // MP4 是二进制容器，不能当文本读；直接取首帧
+        if (file.kind == MediaFile.Kind.MP4) {
+            return firstFrame(context, file.uri)
+        }
+
         // 1) 同目录同名封面（仅 file:// 可直接访问兄弟文件）
         if (file.uri.scheme == "file") {
             val baseName = file.name.substringBeforeLast('.', file.name)

@@ -17,6 +17,7 @@ import androidx.media3.common.Player
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.hls.HlsMediaSource
+import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import androidx.media3.ui.PlayerView
 
 /**
@@ -74,8 +75,14 @@ class M3u8PlayerActivity : Activity() {
 
         val uri = Uri.parse(uriString)
         val dataSourceFactory = DefaultDataSource.Factory(this)
-        val mediaSource = HlsMediaSource.Factory(dataSourceFactory)
-            .createMediaSource(MediaItem.fromUri(uri))
+        val mediaItem = MediaItem.fromUri(uri)
+        // m3u8 走 HLS 源，转换出来的 mp4 走普通 progressive 源
+        val lower = name.lowercase()
+        val mediaSource = if (lower.endsWith(".m3u8") || lower.endsWith(".m3u")) {
+            HlsMediaSource.Factory(dataSourceFactory).createMediaSource(mediaItem)
+        } else {
+            ProgressiveMediaSource.Factory(dataSourceFactory).createMediaSource(mediaItem)
+        }
 
         player = ExoPlayer.Builder(this)
             .build()

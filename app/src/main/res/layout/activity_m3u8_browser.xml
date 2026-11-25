@@ -4,25 +4,28 @@
     android:layout_height="match_parent"
     android:background="#FAFAFA"
     android:orientation="vertical"
-    android:padding="12dp">
+    android:paddingStart="10dp"
+    android:paddingEnd="10dp"
+    android:paddingTop="10dp"
+    android:paddingBottom="10dp">
 
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:paddingBottom="2dp"
         android:text="@string/m3u8_library"
         android:textColor="#222222"
-        android:textSize="20sp"
+        android:textSize="19sp"
         android:textStyle="bold" />
 
     <TextView
         android:id="@+id/countText"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:paddingBottom="10dp"
+        android:paddingTop="2dp"
+        android:paddingBottom="6dp"
         android:text="@string/m3u8_hint_scan"
         android:textColor="#666666"
-        android:textSize="13sp" />
+        android:textSize="12sp" />
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -34,32 +37,122 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:paddingLeft="4dp"
-            android:paddingRight="4dp"
+            android:paddingStart="2dp"
+            android:paddingEnd="2dp"
             android:text="@string/m3u8_scan"
-            android:textSize="13sp" />
+            android:textSize="12sp" />
 
         <Button
             android:id="@+id/rescanButton"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:layout_marginStart="6dp"
+            android:layout_marginStart="4dp"
             android:layout_weight="1"
-            android:paddingLeft="4dp"
-            android:paddingRight="4dp"
+            android:paddingStart="2dp"
+            android:paddingEnd="2dp"
             android:text="@string/m3u8_rescan"
-            android:textSize="13sp" />
+            android:textSize="12sp" />
 
         <Button
             android:id="@+id/folderButton"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:layout_marginStart="6dp"
+            android:layout_marginStart="4dp"
             android:layout_weight="1"
-            android:paddingLeft="4dp"
-            android:paddingRight="4dp"
+            android:paddingStart="2dp"
+            android:paddingEnd="2dp"
             android:text="@string/m3u8_pick_folder"
-            android:textSize="13sp" />
+            android:textSize="12sp" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:orientation="horizontal">
+
+        <Button
+            android:id="@+id/filterAll"
+            android:layout_width="0dp"
+            android:layout_height="32dp"
+            android:layout_weight="1"
+            android:paddingStart="0dp"
+            android:paddingEnd="0dp"
+            android:text="@string/filter_all"
+            android:textSize="12sp" />
+
+        <Button
+            android:id="@+id/filterM3u8"
+            android:layout_width="0dp"
+            android:layout_height="32dp"
+            android:layout_marginStart="4dp"
+            android:layout_weight="1"
+            android:paddingStart="0dp"
+            android:paddingEnd="0dp"
+            android:text="@string/filter_m3u8"
+            android:textSize="12sp" />
+
+        <Button
+            android:id="@+id/filterMp4"
+            android:layout_width="0dp"
+            android:layout_height="32dp"
+            android:layout_marginStart="4dp"
+            android:layout_weight="1"
+            android:paddingStart="0dp"
+            android:paddingEnd="0dp"
+            android:text="@string/filter_mp4"
+            android:textSize="12sp" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:orientation="horizontal">
+
+        <Button
+            android:id="@+id/modeButton"
+            android:layout_width="0dp"
+            android:layout_height="32dp"
+            android:layout_weight="1"
+            android:paddingStart="0dp"
+            android:paddingEnd="0dp"
+            android:text="@string/batch_mode"
+            android:textSize="12sp" />
+
+        <Button
+            android:id="@+id/selectAllButton"
+            android:layout_width="0dp"
+            android:layout_height="32dp"
+            android:layout_marginStart="4dp"
+            android:layout_weight="1"
+            android:paddingStart="0dp"
+            android:paddingEnd="0dp"
+            android:text="@string/batch_select_all"
+            android:textSize="12sp" />
+
+        <Button
+            android:id="@+id/convertSelectedButton"
+            android:layout_width="0dp"
+            android:layout_height="32dp"
+            android:layout_marginStart="4dp"
+            android:layout_weight="1"
+            android:paddingStart="0dp"
+            android:paddingEnd="0dp"
+            android:text="@string/batch_convert"
+            android:textSize="12sp" />
+
+        <Button
+            android:id="@+id/deleteSelectedButton"
+            android:layout_width="0dp"
+            android:layout_height="32dp"
+            android:layout_marginStart="4dp"
+            android:layout_weight="1"
+            android:paddingStart="0dp"
+            android:paddingEnd="0dp"
+            android:text="@string/batch_delete"
+            android:textColor="#C62828"
+            android:textSize="12sp" />
     </LinearLayout>
 
     <ProgressBar
@@ -73,6 +166,7 @@
     <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"
+        android:layout_marginTop="4dp"
         android:layout_weight="1">
 
         <androidx.recyclerview.widget.RecyclerView
@@ -80,7 +174,7 @@
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:clipToPadding="false"
-            android:paddingTop="8dp"
+            android:paddingTop="4dp"
             android:scrollbars="vertical" />
 
         <TextView
@@ -91,7 +185,7 @@
             android:gravity="center"
             android:text="@string/m3u8_empty"
             android:textColor="#888888"
-            android:textSize="14sp"
+            android:textSize="13sp"
             android:visibility="gone" />
     </FrameLayout>
 </LinearLayout>
