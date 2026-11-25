@@ -109,6 +109,7 @@ LiteBrowser/
 - **双路嗅探**：`shouldInterceptRequest` 只旁听、原样返回响应对象（页面行为完全不变），能抓到播放器真实请求的 m3u8 主列表与 mp4 直链；点嗅探按钮时再注入 JS 读 `<video>.currentSrc` 与 `performance` 资源表，补上被 XHR 藏起来的地址。两侧结果按扩展名（mp4/m3u8/mpd/webm/flv/mkv/mov/3gp）去重合并，`.ts` 分片直接丢弃。
 - **内置播放器**：ExoPlayer + 自绘控制条。没用 `PlayerView` 自带控制器，因为需求要 ±10 秒快进快退和旋转按钮；`configChanges` 保证横竖屏切换不重建 Activity、播放不断；`DefaultHttpDataSource` 带上 Referer/UA 绕防盗链；`STATE_BUFFERING` 显示转圈、`onPlayerError` 给重试。
 - **无损转换**：`ffmpeg -i in.m3u8 -map 0:v:0 -map 0:a? -c copy -bsf:a aac_adtstoasc -movflags +faststart out.mp4`。只搬流不编码，所以画质不变、体积通常还略小；`aac_adtstoasc` 解决 HLS 里 ADTS AAC 进 MP4 无声；`-movflags +faststart` 移动 moov 到文件头，不增加体积。转换在单线程前台服务里排队，避免多个 FFmpeg 把低端机拖死。
+- **无扩展名分片**：部分下载器把 ts 存成 `xxx.m3u8_contents/0`、`1`…，FFmpeg 的 HLS demuxer 用 `av_match_ext()` 校验扩展名，文件名没有点会直接拒绝（`-allowed_extensions ALL` 也无效）。此时改为按 m3u8 顺序生成 concat 列表，用 `-f concat -safe 0` 拼接分片，绕开该校验；加密、fMP4、BYTERANGE 不适用 concat，会给出明确原因。
 
 ## 已知限制（基础版取舍）
 

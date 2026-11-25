@@ -17,48 +17,87 @@ object SegmentResolver {
 
     private val uriAttr = Regex("URI=\"([^\"]+)\"")
 
-    data class Inspection(
-        val local: List<String>,
+    data class PlaylistInfo(
+        /** 按 m3u8 顺序排列的本地分片绝对路径（含 EXT-X-MAP 初始化段） */
+        val segments: List<String>,
         val missing: List<String>,
-        val remote: Int
-    )
+        val remote: Int,
+        /** 有 EXT-X-KEY 且 METHOD 不是 NONE */
+        val encrypted: Boolean,
+        /** 有 EXT-X-MAP，即 fMP4 分片 */
+        val fmp4: Boolean,
+        /** 有 EXT-X-BYTERANGE，分片是同一文件的区间 */
+        val byteRange: Boolean,
+        /** 主播放列表（引用的下一层还是 m3u8） */
+        val master: Boolean
+    ) {
+        /** 分片文件名没有扩展名时，FFmpeg 的 HLS demuxer 会直接拒绝 */
+        val hasExtensionlessSegment: Boolean
+            get() = segments.any { path ->
+                val name = try { File(path).name } catch (e: Exception) { path }
+                !name.contains('.')
+            }
+    }
 
     /** 这份 m3u8 引用的本地分片绝对路径（含 EXT-X-MAP 初始化段） */
-    fun localSegments(context: Context, file: MediaFile): List<String> = parse(file).first
+    fun localSegments(context: Context, file: MediaFile): List<String> = parse(file).segments
 
-    /** 转换前体检：分片是否存在、是否其实是个网络播放列表 */
-    fun inspect(context: Context, file: MediaFile): Inspection {
-        val (local, remote) = parse(file)
-        val missing = local.filterNot { path ->
+    /** 转换前体检：分片是否存在、是否加密/fMP4/BYTERANGE、是否其实是网络播放列表 */
+    fun inspect(context: Context, file: MediaFile): PlaylistInfo {
+        val info = parse(file)
+        val missing = info.segments.filterNot { path ->
             try {
                 File(path).exists()
             } catch (e: Exception) {
                 true
             }
         }
-        return Inspection(local, missing, remote)
+        return info.copy(missing = missing)
     }
 
-    private fun parse(file: MediaFile): Pair<List<String>, Int> {
-        if (file.uri.scheme != "file") return emptyList<String>() to 0
+    private fun parse(file: MediaFile): PlaylistInfo {
+        val empty = PlaylistInfo(
+            segments = emptyList(),
+            missing = emptyList(),
+            remote = 0,
+            encrypted = false,
+            fmp4 = false,
+            byteRange = false,
+            master = false
+        )
+        if (file.uri.scheme != "file") return empty
         val source = File(file.path)
-        val base = source.parentFile ?: return emptyList<String>() to 0
+        val base = source.parentFile ?: return empty
         val text = try {
             source.readText(Charsets.UTF_8)
         } catch (e: Exception) {
-            return emptyList<String>() to 0
+            return empty
         }
 
         val result = LinkedHashSet<String>()
         var remote = 0
+        var encrypted = false
+        var fmp4 = false
+        var byteRange = false
+        var master = false
         var previousWasVariant = false
+
         for (raw in text.lineSequence()) {
             val line = raw.trim()
             if (line.isEmpty()) continue
 
+            if (line.startsWith("#EXT-X-KEY:", ignoreCase = true)) {
+                if (!line.contains("METHOD=NONE", ignoreCase = true)) encrypted = true
+            }
+            if (line.startsWith("#EXT-X-BYTERANGE:", ignoreCase = true)) byteRange = true
+            if (line.startsWith("#EXT-X-STREAM-INF", ignoreCase = true) ||
+                line.startsWith("#EXT-X-I-FRAME-STREAM-INF", ignoreCase = true)
+            ) master = true
+
             var ref: String? = null
             if (line.startsWith("#")) {
                 if (line.startsWith("#EXT-X-MAP:", ignoreCase = true)) {
+                    fmp4 = true
                     ref = uriAttr.find(line)?.groupValues?.getOrNull(1)
                 }
                 // EXT-X-STREAM-INF 的下一行是子播放列表，不能当分片删
@@ -82,7 +121,24 @@ object SegmentResolver {
             if (path == file.path) continue
             result.add(path)
         }
-        return result.toList() to remote
+        return PlaylistInfo(
+            segments = result.toList(),
+            missing = emptyList(),
+            remote = remote,
+            encrypted = encrypted,
+            fmp4 = fmp4,
+            byteRange = byteRange,
+            master = master
+        )
+    }
+
+    /** 生成 concat demuxer 用的分片列表；路径里的单引号按 concat 规则转义 */
+    fun concatList(segments: List<String>): String = buildString {
+        for (path in segments) {
+            append("file '")
+            append(path.replace("'", "'\\''"))
+            append("'\n")
+        }
     }
 
     private fun resolve(base: File, ref: String): String? {

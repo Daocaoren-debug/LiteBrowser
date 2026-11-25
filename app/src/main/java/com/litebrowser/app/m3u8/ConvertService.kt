@@ -153,25 +153,42 @@ class ConvertService : Service() {
                 lastModified = sourceMtime
             )
             // 先体检分片：只下到 m3u8 列表、或本身就是网络流，是最常见的“转换失败”原因
-            val inspection = SegmentResolver.inspect(applicationContext, sourceItem)
-            if (inspection.local.isEmpty() && inspection.remote > 0) {
+            val info = SegmentResolver.inspect(applicationContext, sourceItem)
+            if (info.segments.isEmpty() && info.remote > 0) {
                 failed.add("$label（是网络播放列表，分片不在本地）")
                 continue
             }
-            if (inspection.local.isNotEmpty() && inspection.missing.size == inspection.local.size) {
+            if (info.segments.isNotEmpty() && info.missing.size == info.segments.size) {
                 failed.add("$label（分片不在本地，可能只下载了 m3u8 列表）")
                 continue
             }
-            if (inspection.missing.isNotEmpty()) {
+            if (info.missing.isNotEmpty()) {
                 failed.add(
-                    "$label（缺少 ${inspection.missing.size}/${inspection.local.size} 个分片，无法完整转换）"
+                    "$label（缺少 ${info.missing.size}/${info.segments.size} 个分片，无法完整转换）"
                 )
                 continue
             }
 
-            // 标准 HLS(TS) 的 AAC 需要 aac_adtstoasc；少数非 AAC 音轨会失败，降级重试一次
-            var ok = tryConvert(input, out, withAacBsf = true)
-            if (!ok) ok = tryConvert(input, out, withAacBsf = false)
+            // 无扩展名分片：HLS demuxer 必然拒绝，只能走 concat。
+            // 但加密 / fMP4 / BYTERANGE 用 concat 会得到错误内容，提前给出准确原因。
+            if (info.hasExtensionlessSegment) {
+                when {
+                    info.encrypted -> {
+                        failed.add("$label（分片无扩展名且加密，暂不支持转换）")
+                        continue
+                    }
+                    info.fmp4 -> {
+                        failed.add("$label（分片无扩展名且为 fMP4，暂不支持转换）")
+                        continue
+                    }
+                    info.byteRange -> {
+                        failed.add("$label（分片无扩展名且使用 BYTERANGE，暂不支持转换）")
+                        continue
+                    }
+                }
+            }
+
+            var ok = attemptAll(input, out, info)
 
             // 仍失败就把输出先写到应用专属目录，再拷回目标目录。
             // 绕开 Android 11+ 上原生代码对公共目录的写入限制，也能区分"写不了"还是"转不了"。
@@ -179,8 +196,7 @@ class ConvertService : Service() {
                 val tempDir = (getExternalFilesDir("convert") ?: File(cacheDir, "convert"))
                     .apply { mkdirs() }
                 val temp = File(tempDir, "tmp_${System.currentTimeMillis()}.mp4")
-                var tempOk = tryConvert(input, temp, withAacBsf = true)
-                if (!tempOk) tempOk = tryConvert(input, temp, withAacBsf = false)
+                val tempOk = attemptAll(input, temp, info)
                 if (tempOk) {
                     ok = copyFile(temp, out)
                     temp.delete()
@@ -262,10 +278,58 @@ class ConvertService : Service() {
 
     private var lastError: String = ""
 
+    /**
+     * 按优先级尝试：
+     * 1. 分片无扩展名时，先用 concat 拼（HLS demuxer 对无扩展名分片是硬拒绝）；
+     * 2. 常规 HLS 路径，带/不带 aac_adtstoasc 各试一次；
+     * 3. 分片有扩展名但 HLS 失败时，再用 concat 兜底。
+     */
+    private fun attemptAll(
+        input: String,
+        out: File,
+        info: SegmentResolver.PlaylistInfo
+    ): Boolean {
+        val canConcat = info.segments.isNotEmpty() &&
+            info.missing.isEmpty() &&
+            !info.encrypted &&
+            !info.fmp4 &&
+            !info.byteRange
+
+        var ok = false
+        if (canConcat && info.hasExtensionlessSegment) {
+            ok = tryConcat(out, info.segments)
+        }
+        if (!ok) ok = tryConvert(input, out, withAacBsf = true)
+        if (!ok) ok = tryConvert(input, out, withAacBsf = false)
+        if (!ok && canConcat && !info.hasExtensionlessSegment) {
+            ok = tryConcat(out, info.segments)
+        }
+        return ok
+    }
+
     private fun tryConvert(input: String, out: File, withAacBsf: Boolean): Boolean {
         if (out.exists()) out.delete()
         val ok = runFFmpeg(input, out.absolutePath, withAacBsf)
         return ok && out.exists() && out.length() > 0L
+    }
+
+    private fun tryConcat(out: File, segments: List<String>): Boolean {
+        if (out.exists()) out.delete()
+        val listFile = File(cacheDir, "concat_${System.currentTimeMillis()}.txt")
+        return try {
+            listFile.writeText(SegmentResolver.concatList(segments), Charsets.UTF_8)
+            val ok = runConcatFfmpeg(listFile.absolutePath, out.absolutePath)
+            ok && out.exists() && out.length() > 0L
+        } catch (e: Exception) {
+            lastError = "生成 concat 分片列表失败：" + e.toString()
+            false
+        } finally {
+            try {
+                listFile.delete()
+            } catch (e: Exception) {
+                // 列表文件删不掉不影响结果
+            }
+        }
     }
 
     private fun runFFmpeg(input: String, output: String, withAacBsf: Boolean): Boolean {
@@ -296,6 +360,37 @@ class ConvertService : Service() {
         args += "-movflags"
         args += "+faststart"
         args += output
+        return execute(args)
+    }
+
+    /** 分片无扩展名时用 concat demuxer 拼，绕开 HLS demuxer 的扩展名校验 */
+    private fun runConcatFfmpeg(listPath: String, output: String): Boolean {
+        val args = ArrayList<String>()
+        args += "-hide_banner"
+        args += "-n"
+        args += "-f"
+        args += "concat"
+        args += "-safe"
+        args += "0"
+        args += "-fflags"
+        args += "+genpts"
+        args += "-i"
+        args += listPath
+        args += "-map"
+        args += "0:v:0"
+        args += "-map"
+        args += "0:a?"
+        args += "-c"
+        args += "copy"
+        args += "-avoid_negative_ts"
+        args += "make_zero"
+        args += "-movflags"
+        args += "+faststart"
+        args += output
+        return execute(args)
+    }
+
+    private fun execute(args: List<String>): Boolean {
         return try {
             val session = FFmpegKit.executeWithArguments(args.toTypedArray())
             val ok = ReturnCode.isSuccess(session.returnCode)
