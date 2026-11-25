@@ -17,6 +17,10 @@ object SegmentResolver {
 
     private val uriAttr = Regex("URI=\"([^\"]+)\"")
 
+    private fun attr(line: String, name: String): String? =
+        Regex("$name=\"([^\"]+)\"", RegexOption.IGNORE_CASE)
+            .find(line)?.groupValues?.getOrNull(1)
+
     data class PlaylistInfo(
         /** 按 m3u8 顺序排列的本地分片绝对路径（含 EXT-X-MAP 初始化段） */
         val segments: List<String>,
@@ -29,7 +33,13 @@ object SegmentResolver {
         /** 有 EXT-X-BYTERANGE，分片是同一文件的区间 */
         val byteRange: Boolean,
         /** 主播放列表（引用的下一层还是 m3u8） */
-        val master: Boolean
+        val master: Boolean,
+        /** AES-128 密钥地址（URI），已按 m3u8 所在目录解析成绝对路径或网络地址 */
+        val keyUri: String? = null,
+        /** #EXT-X-KEY 的 IV，0x 开头的十六进制 */
+        val keyIv: String? = null,
+        /** #EXT-X-MEDIA-SEQUENCE，未指定 IV 时用它推算 */
+        val mediaSequence: Long = 0L
     ) {
         /** 分片文件名没有扩展名时，FFmpeg 的 HLS demuxer 会直接拒绝 */
         val hasExtensionlessSegment: Boolean
@@ -63,7 +73,10 @@ object SegmentResolver {
             encrypted = false,
             fmp4 = false,
             byteRange = false,
-            master = false
+            master = false,
+            keyUri = null,
+            keyIv = null,
+            mediaSequence = 0L
         )
         if (file.uri.scheme != "file") return empty
         val source = File(file.path)
@@ -80,6 +93,9 @@ object SegmentResolver {
         var fmp4 = false
         var byteRange = false
         var master = false
+        var keyUri: String? = null
+        var keyIv: String? = null
+        var mediaSequence = 0L
         var previousWasVariant = false
 
         for (raw in text.lineSequence()) {
@@ -87,7 +103,27 @@ object SegmentResolver {
             if (line.isEmpty()) continue
 
             if (line.startsWith("#EXT-X-KEY:", ignoreCase = true)) {
-                if (!line.contains("METHOD=NONE", ignoreCase = true)) encrypted = true
+                val method = attr(line, "METHOD") ?: ""
+                if (!method.equals("NONE", ignoreCase = true)) {
+                    encrypted = true
+                    // 只取第一个可用的 AES-128 密钥；identity 之后可能还有 DRM 的 KEYFORMAT，跳过
+                    if (keyUri == null &&
+                        (method.equals("AES-128", ignoreCase = true) || method.isEmpty())
+                    ) {
+                        val rawUri = attr(line, "URI")
+                        keyIv = attr(line, "IV")
+                        keyUri = when {
+                            rawUri.isNullOrBlank() -> null
+                            rawUri.startsWith("http://", true) ||
+                                rawUri.startsWith("https://", true) -> rawUri
+                            else -> resolve(base, rawUri)
+                        }
+                    }
+                }
+            }
+            if (line.startsWith("#EXT-X-MEDIA-SEQUENCE:", ignoreCase = true)) {
+                val value = line.substringAfter(":", "").trim().toLongOrNull()
+                if (value != null) mediaSequence = value
             }
             if (line.startsWith("#EXT-X-BYTERANGE:", ignoreCase = true)) byteRange = true
             if (line.startsWith("#EXT-X-STREAM-INF", ignoreCase = true) ||
@@ -128,7 +164,10 @@ object SegmentResolver {
             encrypted = encrypted,
             fmp4 = fmp4,
             byteRange = byteRange,
-            master = master
+            master = master,
+            keyUri = keyUri,
+            keyIv = keyIv,
+            mediaSequence = mediaSequence
         )
     }
 

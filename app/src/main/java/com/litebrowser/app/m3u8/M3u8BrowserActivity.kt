@@ -49,6 +49,8 @@ class M3u8BrowserActivity : Activity() {
     private var filter = Filter.ALL
     private var lastStatus = ""
     private var convertedKeys: Set<String> = emptySet()
+    private var pendingDelete: List<MediaFile> = emptyList()
+    private var pendingConvert: Triple<List<MediaFile>, Boolean, Boolean>? = null
     private lateinit var deleteSourceCheck: CheckBox
     private lateinit var deleteSegmentsCheck: CheckBox
 
@@ -102,6 +104,7 @@ class M3u8BrowserActivity : Activity() {
         private const val REQ_STORAGE = 1001
         private const val REQ_MANAGE = 1002
         private const val REQ_TREE = 1003
+        private const val REQ_WRITE = 1004
         private const val PREFS = "litebrowser_settings"
         private const val KEY_DELETE_SOURCE = "delete_source_after_convert"
         private const val KEY_DELETE_SEGMENTS = "delete_segments_after_convert"
@@ -330,36 +333,32 @@ class M3u8BrowserActivity : Activity() {
 
         val deleteSource = deleteSourceCheck.isChecked
         val deleteSegments = deleteSource && deleteSegmentsCheck.isChecked
-
-        fun showConfirm(message: String) {
-            AlertDialog.Builder(this@M3u8BrowserActivity)
-                .setTitle(getString(R.string.batch_convert))
-                .setMessage(message)
-                .setNegativeButton(getString(R.string.cancel), null)
-                .setPositiveButton(getString(R.string.batch_convert)) { _, _ ->
-                    startConvert(pending, deleteSource, deleteSegments)
-                }
-                .show()
+        if (deleteSource && !hasWritePermission()) {
+            // 先把待办存起来，授权后直接继续，不用用户再点一次
+            pendingConvert = Triple(pending, deleteSource, deleteSegments)
+            requestWritePermission()
+            Toast.makeText(this, "需要先授予存储写入权限才能删除源文件", Toast.LENGTH_LONG).show()
+            return
         }
 
-        if (deleteSegments) {
-            estimateRelease(pending) { bytes ->
-                showConfirm(
-                    getString(
-                        R.string.convert_confirm_delete_with_size,
-                        pending.size,
-                        SegmentResolver.formatSize(bytes)
-                    )
-                )
+        confirmConvert(pending, deleteSource, deleteSegments)
+    }
+
+    /** 转换确认：这里不估算释放空间，解析分片很慢会让按钮点了半天才弹窗 */
+    private fun confirmConvert(pending: List<MediaFile>, deleteSource: Boolean, deleteSegments: Boolean) {
+        val messageRes = when {
+            deleteSegments -> R.string.convert_confirm_delete_segments
+            deleteSource -> R.string.convert_confirm_delete
+            else -> R.string.convert_confirm_keep
+        }
+        AlertDialog.Builder(this)
+            .setTitle(getString(R.string.batch_convert))
+            .setMessage(getString(messageRes, pending.size))
+            .setNegativeButton(getString(R.string.cancel), null)
+            .setPositiveButton(getString(R.string.batch_convert)) { _, _ ->
+                startConvert(pending, deleteSource, deleteSegments)
             }
-        } else {
-            showConfirm(
-                getString(
-                    if (deleteSource) R.string.convert_confirm_delete else R.string.convert_confirm_keep,
-                    pending.size
-                )
-            )
-        }
+            .show()
     }
 
     /** 后台估算"删文件 + 清理其独占分片"能腾出多少空间 */
@@ -405,6 +404,12 @@ class M3u8BrowserActivity : Activity() {
     }
 
     private fun askDelete(files: List<MediaFile>) {
+        if (!hasWritePermission()) {
+            pendingDelete = files
+            requestWritePermission()
+            Toast.makeText(this, "需要先授予存储写入权限才能删除", Toast.LENGTH_LONG).show()
+            return
+        }
         // 删除的目的就是腾空间：无论开关如何，都连带清理独占分片
         estimateRelease(files) { bytes ->
             AlertDialog.Builder(this@M3u8BrowserActivity)
@@ -470,6 +475,27 @@ class M3u8BrowserActivity : Activity() {
         }
     }
 
+    /** 删除文件需要写权限：Android 11+ 用 MANAGE_EXTERNAL_STORAGE，9/10 用 WRITE_EXTERNAL_STORAGE */
+    private fun hasWritePermission(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            Environment.isExternalStorageManager()
+        } else {
+            checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE) ==
+                PackageManager.PERMISSION_GRANTED
+        }
+    }
+
+    private fun requestWritePermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            requestStoragePermission()
+        } else {
+            requestPermissions(
+                arrayOf(android.Manifest.permission.WRITE_EXTERNAL_STORAGE),
+                REQ_WRITE
+            )
+        }
+    }
+
     private fun hasStoragePermission(): Boolean {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             Environment.isExternalStorageManager()
@@ -515,6 +541,23 @@ class M3u8BrowserActivity : Activity() {
             } else {
                 Toast.makeText(this, "未获得存储权限，可用“选择文件夹”方式", Toast.LENGTH_LONG).show()
             }
+        } else if (requestCode == REQ_WRITE) {
+            if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
+                val files = pendingDelete
+                pendingDelete = emptyList()
+                if (files.isNotEmpty()) {
+                    askDelete(files)
+                } else {
+                    pendingConvert?.let {
+                        pendingConvert = null
+                        confirmConvert(it.first, it.second, it.third)
+                    }
+                }
+            } else {
+                pendingDelete = emptyList()
+                pendingConvert = null
+                Toast.makeText(this, "没有写入权限，无法删除文件", Toast.LENGTH_LONG).show()
+            }
         }
     }
 
@@ -522,7 +565,19 @@ class M3u8BrowserActivity : Activity() {
         super.onActivityResult(requestCode, resultCode, data)
         when (requestCode) {
             REQ_MANAGE -> {
-                if (hasStoragePermission()) {
+                val toDelete = pendingDelete
+                pendingDelete = emptyList()
+                if (toDelete.isNotEmpty()) {
+                    if (hasWritePermission()) {
+                        askDelete(toDelete)
+                    } else {
+                        Toast.makeText(this, "没有写入权限，无法删除文件", Toast.LENGTH_LONG).show()
+                    }
+                } else if (pendingConvert != null) {
+                    val job = pendingConvert!!
+                    pendingConvert = null
+                    confirmConvert(job.first, job.second, job.third)
+                } else if (hasStoragePermission()) {
                     startScan(incremental = true)
                 } else {
                     Toast.makeText(this, "未开启“所有文件访问权限”，可改用“选择文件夹”", Toast.LENGTH_LONG).show()

@@ -169,23 +169,13 @@ class ConvertService : Service() {
                 continue
             }
 
-            // 无扩展名分片：HLS demuxer 必然拒绝，只能走 concat。
-            // 但加密 / fMP4 / BYTERANGE 用 concat 会得到错误内容，提前给出准确原因。
-            if (info.hasExtensionlessSegment) {
-                when {
-                    info.encrypted -> {
-                        failed.add("$label（分片无扩展名且加密，暂不支持转换）")
-                        continue
-                    }
-                    info.fmp4 -> {
-                        failed.add("$label（分片无扩展名且为 fMP4，暂不支持转换）")
-                        continue
-                    }
-                    info.byteRange -> {
-                        failed.add("$label（分片无扩展名且使用 BYTERANGE，暂不支持转换）")
-                        continue
-                    }
-                }
+            // 无扩展名分片必须走 concat；fMP4 / BYTERANGE 用 concat 会得到错误内容，
+            // 提前给出准确原因。AES-128 加密会先在本地解密再 concat。
+            if (info.hasExtensionlessSegment && (info.fmp4 || info.byteRange)) {
+                failed.add(
+                    "$label（分片无扩展名且为 ${if (info.fmp4) "fMP4" else "BYTERANGE"}，暂不支持转换）"
+                )
+                continue
             }
 
             var ok = attemptAll(input, out, info)
@@ -291,17 +281,31 @@ class ConvertService : Service() {
     ): Boolean {
         val canConcat = info.segments.isNotEmpty() &&
             info.missing.isEmpty() &&
-            !info.encrypted &&
             !info.fmp4 &&
             !info.byteRange
 
         var ok = false
         if (canConcat && info.hasExtensionlessSegment) {
-            ok = tryConcat(out, info.segments)
+            if (info.encrypted) {
+                // 先把 AES-128 分片解密成临时 .ts，再拼；密钥读不到就直接报准确原因
+                val work = File(cacheDir, "dec_${System.currentTimeMillis()}")
+                val decrypted = HlsDecryptor.decrypt(applicationContext, info, work)
+                if (decrypted.error != null) {
+                    lastError = "分片解密失败：" + decrypted.error
+                    return false
+                }
+                try {
+                    ok = tryConcat(out, decrypted.paths)
+                } finally {
+                    HlsDecryptor.cleanup(decrypted.paths, work)
+                }
+            } else {
+                ok = tryConcat(out, info.segments)
+            }
         }
         if (!ok) ok = tryConvert(input, out, withAacBsf = true)
         if (!ok) ok = tryConvert(input, out, withAacBsf = false)
-        if (!ok && canConcat && !info.hasExtensionlessSegment) {
+        if (!ok && canConcat && !info.hasExtensionlessSegment && !info.encrypted) {
             ok = tryConcat(out, info.segments)
         }
         return ok
