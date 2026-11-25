@@ -110,10 +110,14 @@
     <string name="convert_confirm_delete">转换成功后将删除 %1$d 个源 m3u8（只删列表文件，同目录 ts 分片不清理），不可恢复。确定继续？</string>
     <string name="convert_confirm_keep">确定转换 %1$d 个文件？已转换过的会自动跳过。</string>
     <string name="convert_no_candidates">选中的文件都已经转换过了</string>
+    <string name="convert_delete_segments">转换后同时清理 ts 分片</string>
+    <string name="delete_confirm_with_size">确定删除 %1$d 个文件？会同时清理未被其他播放列表引用的分片，预计释放约 %2$s，不可恢复。</string>
+    <string name="convert_confirm_delete_with_size">转换成功后将删除 %1$d 个源 m3u8 及其未被其他播放列表引用的分片，预计释放约 %2$s，不可恢复。确定继续？</string>
+    <string name="delete_with_freed">已删除，释放约 %1$s</string>
 
     <!-- 其他 -->
     <string name="error_page_title">页面打不开</string>
     <string name="error_page_hint">请检查网络或网址后重试，也可以点下方刷新按钮</string>
     <string name="press_again_to_exit">再按一次返回键退出</string>
-    <string name="about_message">轻览浏览器 v1.4.1\n基于系统 WebView 的轻量浏览器，仅播放与列表使用少量 AndroidX/Media3，并内置 FFmpeg 用于视频封装转换。\n\n功能：网页浏览、网页视频全屏、资源嗅探 + 内置播放器（快进快退/拖动进度/长按边缘快进）、本地 m3u8/mp4 扫描播放（手动横竖屏）、m3u8→mp4 无损转换（批量、去重、可选删源）、文件下载、网址收藏、历史记录、分享与复制链接。\n\nFFmpeg 采用 LGPL-3.0 许可，详见仓库 THIRD_PARTY_NOTICES.md。</string>
+    <string name="about_message">轻览浏览器 v1.4.2\n基于系统 WebView 的轻量浏览器，仅播放与列表使用少量 AndroidX/Media3，并内置 FFmpeg 用于视频封装转换。\n\n功能：网页浏览、网页视频全屏、资源嗅探 + 内置播放器（快进快退/拖动进度/长按边缘快进）、本地 m3u8/mp4 扫描播放（手动横竖屏）、m3u8→mp4 无损转换（批量、去重、可选删源/清理分片）、文件下载、网址收藏、历史记录、分享与复制链接。\n\nFFmpeg 采用 LGPL-3.0 许可，详见仓库 THIRD_PARTY_NOTICES.md。</string>
 </resources>

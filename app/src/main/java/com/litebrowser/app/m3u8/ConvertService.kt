@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
@@ -29,6 +30,7 @@ class ConvertService : Service() {
     companion object {
         const val EXTRA_INPUTS = "inputs"
         const val EXTRA_DELETE_SOURCE = "deleteSource"
+        const val EXTRA_DELETE_SEGMENTS = "deleteSegments"
         const val ACTION_PROGRESS = "com.litebrowser.app.convert.PROGRESS"
         const val ACTION_DONE = "com.litebrowser.app.convert.DONE"
         const val ACTION_REMOVED = "com.litebrowser.app.convert.REMOVED"
@@ -88,15 +90,23 @@ class ConvertService : Service() {
         startForeground(NOTIFY_ID, notification("准备转换 ${inputs.size} 个文件", 0, inputs.size))
 
         val deleteSource = intent?.getBooleanExtra(EXTRA_DELETE_SOURCE, false) == true
-        worker.post { convertAll(inputs, deleteSource) }
+        val deleteSegments = deleteSource &&
+            intent?.getBooleanExtra(EXTRA_DELETE_SEGMENTS, false) == true
+        worker.post { convertAll(inputs, deleteSource, deleteSegments) }
         return START_NOT_STICKY
     }
 
-    private fun convertAll(inputs: List<String>, deleteSource: Boolean) {
+    private fun convertAll(
+        inputs: List<String>,
+        deleteSource: Boolean,
+        deleteSegments: Boolean
+    ) {
         val succeeded = ArrayList<String>()
         val failed = ArrayList<String>()
         val skipped = ArrayList<String>()
         val removed = ArrayList<String>()
+        var releasedBytes = 0L
+        var removedSourceBytes = 0L
 
         for ((index, input) in inputs.withIndex()) {
             current = index + 1
@@ -131,9 +141,27 @@ class ConvertService : Service() {
                 succeeded.add("${out.name}（${formatSize(out.length())}）")
 
                 if (deleteSource) {
+                    // 必须在删源之前解析它引用了哪些分片
+                    val segments = if (deleteSegments) {
+                        val sourceItem = MediaFile(
+                            name = label,
+                            path = input,
+                            size = sourceSize,
+                            uri = Uri.fromFile(source),
+                            lastModified = sourceMtime
+                        )
+                        SegmentResolver.releasableSegments(applicationContext, sourceItem)
+                    } else emptyList()
+                    val segmentBytes = SegmentResolver.sizeOf(segments)
+
                     if (source.delete()) {
+                        if (segments.isNotEmpty()) {
+                            SegmentResolver.delete(segments)
+                            releasedBytes += segmentBytes
+                        }
                         ConvertStore.removeSource(applicationContext, input)
                         removed.add(input)
+                        removedSourceBytes += sourceSize
                         broadcast(ACTION_REMOVED, path = input)
                     } else {
                         succeeded[succeeded.size - 1] += "（源 m3u8 删除失败，已标记为已转换）"
@@ -147,7 +175,10 @@ class ConvertService : Service() {
 
         val parts = ArrayList<String>()
         if (succeeded.isNotEmpty()) parts.add("成功 ${succeeded.size} 个：${succeeded.joinToString("、")}")
-        if (removed.isNotEmpty()) parts.add("已删除 ${removed.size} 个源 m3u8")
+        if (removed.isNotEmpty()) {
+            val freed = SegmentResolver.formatSize(releasedBytes + removedSourceBytes)
+            parts.add("已删除 ${removed.size} 个源 m3u8，释放约 $freed")
+        }
         if (skipped.isNotEmpty()) parts.add("跳过 ${skipped.size} 个：${skipped.joinToString("、")}")
         if (failed.isNotEmpty()) parts.add("失败 ${failed.size} 个：${failed.joinToString("、")}")
         val summary = parts.joinToString("\n").ifEmpty { "没有需要转换的文件" }

@@ -50,6 +50,7 @@ class M3u8BrowserActivity : Activity() {
     private var lastStatus = ""
     private var convertedKeys: Set<String> = emptySet()
     private lateinit var deleteSourceCheck: CheckBox
+    private lateinit var deleteSegmentsCheck: CheckBox
 
     private val filterButtons: Array<Button> by lazy {
         arrayOf(
@@ -99,6 +100,7 @@ class M3u8BrowserActivity : Activity() {
         private const val REQ_TREE = 1003
         private const val PREFS = "litebrowser_settings"
         private const val KEY_DELETE_SOURCE = "delete_source_after_convert"
+        private const val KEY_DELETE_SEGMENTS = "delete_segments_after_convert"
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -115,6 +117,13 @@ class M3u8BrowserActivity : Activity() {
         deleteSourceCheck.setOnCheckedChangeListener { _, checked ->
             getSharedPreferences(PREFS, MODE_PRIVATE).edit()
                 .putBoolean(KEY_DELETE_SOURCE, checked).apply()
+        }
+        deleteSegmentsCheck = findViewById(R.id.deleteSegmentsCheck)
+        deleteSegmentsCheck.isChecked = getSharedPreferences(PREFS, MODE_PRIVATE)
+            .getBoolean(KEY_DELETE_SEGMENTS, false)
+        deleteSegmentsCheck.setOnCheckedChangeListener { _, checked ->
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                .putBoolean(KEY_DELETE_SEGMENTS, checked).apply()
         }
 
         adapter = FileAdapter(
@@ -294,27 +303,64 @@ class M3u8BrowserActivity : Activity() {
         }
 
         val deleteSource = deleteSourceCheck.isChecked
-        val message = getString(
-            if (deleteSource) R.string.convert_confirm_delete else R.string.convert_confirm_keep,
-            pending.size
-        )
-        AlertDialog.Builder(this)
-            .setTitle(getString(R.string.batch_convert))
-            .setMessage(message)
-            .setNegativeButton(getString(R.string.cancel), null)
-            .setPositiveButton(getString(R.string.batch_convert)) { _, _ ->
-                startConvert(pending, deleteSource)
+        val deleteSegments = deleteSource && deleteSegmentsCheck.isChecked
+
+        fun showConfirm(message: String) {
+            AlertDialog.Builder(this@M3u8BrowserActivity)
+                .setTitle(getString(R.string.batch_convert))
+                .setMessage(message)
+                .setNegativeButton(getString(R.string.cancel), null)
+                .setPositiveButton(getString(R.string.batch_convert)) { _, _ ->
+                    startConvert(pending, deleteSource, deleteSegments)
+                }
+                .show()
+        }
+
+        if (deleteSegments) {
+            estimateRelease(pending) { bytes ->
+                showConfirm(
+                    getString(
+                        R.string.convert_confirm_delete_with_size,
+                        pending.size,
+                        SegmentResolver.formatSize(bytes)
+                    )
+                )
             }
-            .show()
+        } else {
+            showConfirm(
+                getString(
+                    if (deleteSource) R.string.convert_confirm_delete else R.string.convert_confirm_keep,
+                    pending.size
+                )
+            )
+        }
     }
 
-    private fun startConvert(pending: List<MediaFile>, deleteSource: Boolean) {
+    /** 后台估算"删文件 + 清理其独占分片"能腾出多少空间 */
+    private fun estimateRelease(files: List<MediaFile>, callback: (Long) -> Unit) {
+        executor.execute {
+            var bytes = files.sumOf { it.size }
+            for (file in files) {
+                bytes += SegmentResolver.sizeOf(
+                    SegmentResolver.releasableSegments(applicationContext, file)
+                )
+            }
+            runOnUiThread { callback(bytes) }
+        }
+    }
+
+    private fun startConvert(
+        pending: List<MediaFile>,
+        deleteSource: Boolean,
+        deleteSegments: Boolean
+    ) {
         val intent = Intent(this, ConvertService::class.java)
             .putStringArrayListExtra(
                 ConvertService.EXTRA_INPUTS,
                 ArrayList(pending.map { it.path })
             )
             .putExtra(ConvertService.EXTRA_DELETE_SOURCE, deleteSource)
+            .putExtra(ConvertService.EXTRA_DELETE_SEGMENTS, deleteSegments)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(intent)
         } else {
@@ -328,50 +374,68 @@ class M3u8BrowserActivity : Activity() {
     }
 
     private fun askDelete(files: List<MediaFile>) {
-        val message = if (files.size == 1) {
-            getString(R.string.confirm_delete_one, files[0].name)
-        } else {
-            getString(R.string.confirm_delete_many, files.size)
+        // 删除的目的就是腾空间：无论开关如何，都连带清理独占分片
+        estimateRelease(files) { bytes ->
+            AlertDialog.Builder(this@M3u8BrowserActivity)
+                .setTitle(getString(R.string.delete))
+                .setMessage(
+                    getString(
+                        R.string.delete_confirm_with_size,
+                        files.size,
+                        SegmentResolver.formatSize(bytes)
+                    )
+                )
+                .setNegativeButton(getString(R.string.cancel), null)
+                .setPositiveButton(getString(R.string.delete)) { _, _ -> deleteFiles(files) }
+                .show()
         }
-        AlertDialog.Builder(this)
-            .setTitle(getString(R.string.delete))
-            .setMessage(message)
-            .setNegativeButton(getString(R.string.cancel), null)
-            .setPositiveButton(getString(R.string.delete)) { _, _ -> deleteFiles(files) }
-            .show()
     }
 
     private fun deleteFiles(files: List<MediaFile>) {
-        var deleted = 0
-        for (file in files) {
-            try {
-                val ok = if (file.uri.scheme == "file") {
-                    File(file.path).delete()
-                } else {
-                    DocumentsContract.deleteDocument(contentResolver, file.uri)
-                }
-                if (ok) {
-                    deleted++
-                    // 删掉输出 mp4 要让源 m3u8 恢复可转换；删源则清掉对应记录
-                    if (file.kind == MediaFile.Kind.MP4) {
-                        ConvertStore.removeOutput(applicationContext, file.path)
+        executor.execute {
+            var deleted = 0
+            var freed = 0L
+            for (file in files) {
+                try {
+                    // 先算出这份列表独占的分片，再删列表本身
+                    val segments = SegmentResolver.releasableSegments(applicationContext, file)
+                    val segmentBytes = SegmentResolver.sizeOf(segments)
+                    val ok = if (file.uri.scheme == "file") {
+                        File(file.path).delete()
                     } else {
-                        ConvertStore.removeSource(applicationContext, file.path)
+                        DocumentsContract.deleteDocument(contentResolver, file.uri)
                     }
+                    if (ok) {
+                        deleted++
+                        freed += file.size + segmentBytes
+                        SegmentResolver.delete(segments)
+                        // 删掉输出 mp4 要让源 m3u8 恢复可转换；删源则清掉对应记录
+                        if (file.kind == MediaFile.Kind.MP4) {
+                            ConvertStore.removeOutput(applicationContext, file.path)
+                        } else {
+                            ConvertStore.removeSource(applicationContext, file.path)
+                        }
+                    }
+                } catch (e: Exception) {
+                    // 单个失败不影响其余文件
                 }
-            } catch (e: Exception) {
-                // 单个失败不影响其余文件
             }
-        }
-        if (deleted > 0) {
-            val removed = files.map { it.uri.toString() }.toHashSet()
-            cachedFiles = cachedFiles.filterNot { it.uri.toString() in removed }
-            ScanStore.save(this, ScanStore.Snapshot(cachedFiles, lastScan, savedTreeUri))
-            lastStatus = getString(R.string.delete_done, deleted)
-            adapter.clearSelection()
-            refreshUi()
-        } else {
-            Toast.makeText(this, getString(R.string.delete_failed), Toast.LENGTH_LONG).show()
+
+            runOnUiThread {
+                if (deleted > 0) {
+                    val removed = files.map { it.uri.toString() }.toHashSet()
+                    cachedFiles = cachedFiles.filterNot { it.uri.toString() in removed }
+                    ScanStore.save(this, ScanStore.Snapshot(cachedFiles, lastScan, savedTreeUri))
+                    lastStatus = getString(
+                        R.string.delete_with_freed,
+                        SegmentResolver.formatSize(freed)
+                    )
+                    adapter.clearSelection()
+                    refreshUi()
+                } else {
+                    Toast.makeText(this, getString(R.string.delete_failed), Toast.LENGTH_LONG).show()
+                }
+            }
         }
     }
 

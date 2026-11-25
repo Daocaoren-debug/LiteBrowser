@@ -166,6 +166,15 @@
         android:textColor="#555555"
         android:textSize="12sp" />
 
+    <CheckBox
+        android:id="@+id/deleteSegmentsCheck"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:minHeight="30dp"
+        android:text="@string/convert_delete_segments"
+        android:textColor="#555555"
+        android:textSize="12sp" />
+
     <ProgressBar
         android:id="@+id/progress"
         style="?android:attr/progressBarStyleHorizontal"
