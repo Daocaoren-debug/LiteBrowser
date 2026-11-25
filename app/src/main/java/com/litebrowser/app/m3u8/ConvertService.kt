@@ -99,7 +99,7 @@ class ConvertService : Service() {
             val out = File(outputPathOf(input))
             val label = source.name
 
-            broadcast(ACTION_PROGRESS, current = current, total = total, name = label)
+            broadcast(ACTION_PROGRESS, currentValue = current, totalValue = total, name = label)
             notifyProgress(label)
 
             if (!source.exists()) {
