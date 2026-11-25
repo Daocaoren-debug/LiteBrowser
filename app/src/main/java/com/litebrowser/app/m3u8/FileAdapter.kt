@@ -1,5 +1,6 @@
 package com.litebrowser.app.m3u8
 
+import android.graphics.Color
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -25,6 +26,16 @@ class FileAdapter(
     var selectionMode: Boolean = false
     val selected: MutableSet<String> = HashSet()
 
+    /** 已经转换过的源 m3u8：置灰并隐藏"转 MP4"按钮 */
+    private var convertedKeys: Set<String> = emptySet()
+
+    fun setConverted(keys: Set<String>) {
+        convertedKeys = keys
+        notifyDataSetChanged()
+    }
+
+    fun isConverted(key: String): Boolean = key in convertedKeys
+
     class ViewHolder(view: View) : RecyclerView.ViewHolder(view) {
         val check: CheckBox = view.findViewById(R.id.fileCheck)
         val thumb: ImageView = view.findViewById(R.id.fileThumb)
@@ -37,9 +48,10 @@ class FileAdapter(
         val delete: Button = view.findViewById(R.id.deleteButton)
     }
 
-    fun submitList(list: List<MediaFile>) {
+    fun submitList(list: List<MediaFile>, converted: Set<String>) {
         items.clear()
         items.addAll(list)
+        convertedKeys = converted
         notifyDataSetChanged()
         onSelectionChanged(selectedCount())
     }
@@ -84,13 +96,22 @@ class FileAdapter(
         holder.name.text = item.name
         holder.path.text = item.path
         holder.size.text = formatSize(item.size)
-        holder.type.text = if (item.kind == MediaFile.Kind.M3U8) "M3U8" else "MP4"
+        val converted = key in convertedKeys
+        if (converted) {
+            holder.type.text = holder.itemView.context.getString(R.string.converted_badge)
+            holder.type.setBackgroundColor(Color.parseColor("#E0E0E0"))
+            holder.type.setTextColor(Color.parseColor("#666666"))
+        } else {
+            holder.type.text = if (item.kind == MediaFile.Kind.M3U8) "M3U8" else "MP4"
+            holder.type.setBackgroundColor(Color.parseColor("#E3F2FD"))
+            holder.type.setTextColor(Color.parseColor("#1565C0"))
+        }
 
         holder.check.visibility = if (selectionMode) View.VISIBLE else View.GONE
         holder.check.isChecked = key in selected
         holder.actionArea.visibility = if (selectionMode) View.GONE else View.VISIBLE
         holder.convert.visibility =
-            if (!selectionMode && item.convertible) View.VISIBLE else View.GONE
+            if (!selectionMode && item.convertible && !converted) View.VISIBLE else View.GONE
         holder.delete.visibility = if (selectionMode) View.GONE else View.VISIBLE
 
         holder.itemView.setOnClickListener {

@@ -28,8 +28,11 @@ class ConvertService : Service() {
 
     companion object {
         const val EXTRA_INPUTS = "inputs"
+        const val EXTRA_DELETE_SOURCE = "deleteSource"
         const val ACTION_PROGRESS = "com.litebrowser.app.convert.PROGRESS"
         const val ACTION_DONE = "com.litebrowser.app.convert.DONE"
+        const val ACTION_REMOVED = "com.litebrowser.app.convert.REMOVED"
+        const val EXTRA_PATH = "path"
         const val EXTRA_CURRENT = "current"
         const val EXTRA_TOTAL = "total"
         const val EXTRA_NAME = "name"
@@ -84,20 +87,24 @@ class ConvertService : Service() {
         createChannel()
         startForeground(NOTIFY_ID, notification("准备转换 ${inputs.size} 个文件", 0, inputs.size))
 
-        worker.post { convertAll(inputs) }
+        val deleteSource = intent?.getBooleanExtra(EXTRA_DELETE_SOURCE, false) == true
+        worker.post { convertAll(inputs, deleteSource) }
         return START_NOT_STICKY
     }
 
-    private fun convertAll(inputs: List<String>) {
+    private fun convertAll(inputs: List<String>, deleteSource: Boolean) {
         val succeeded = ArrayList<String>()
         val failed = ArrayList<String>()
         val skipped = ArrayList<String>()
+        val removed = ArrayList<String>()
 
         for ((index, input) in inputs.withIndex()) {
             current = index + 1
             val source = File(input)
             val out = File(outputPathOf(input))
             val label = source.name
+            val sourceSize = try { source.length() } catch (e: Exception) { 0L }
+            val sourceMtime = try { source.lastModified() } catch (e: Exception) { 0L }
 
             broadcast(ACTION_PROGRESS, currentValue = current, totalValue = total, name = label)
             notifyProgress(label)
@@ -119,7 +126,19 @@ class ConvertService : Service() {
             }
 
             if (ok && out.exists() && out.length() > 0L) {
+                // 先记录再决定是否删源文件：即使删失败，下次也不会重复转换
+                ConvertStore.mark(applicationContext, input, out.absolutePath, sourceSize, sourceMtime)
                 succeeded.add("${out.name}（${formatSize(out.length())}）")
+
+                if (deleteSource) {
+                    if (source.delete()) {
+                        ConvertStore.removeSource(applicationContext, input)
+                        removed.add(input)
+                        broadcast(ACTION_REMOVED, path = input)
+                    } else {
+                        succeeded[succeeded.size - 1] += "（源 m3u8 删除失败，已标记为已转换）"
+                    }
+                }
             } else {
                 if (out.exists()) out.delete()
                 failed.add(label)
@@ -128,6 +147,7 @@ class ConvertService : Service() {
 
         val parts = ArrayList<String>()
         if (succeeded.isNotEmpty()) parts.add("成功 ${succeeded.size} 个：${succeeded.joinToString("、")}")
+        if (removed.isNotEmpty()) parts.add("已删除 ${removed.size} 个源 m3u8")
         if (skipped.isNotEmpty()) parts.add("跳过 ${skipped.size} 个：${skipped.joinToString("、")}")
         if (failed.isNotEmpty()) parts.add("失败 ${failed.size} 个：${failed.joinToString("、")}")
         val summary = parts.joinToString("\n").ifEmpty { "没有需要转换的文件" }
@@ -210,7 +230,8 @@ class ConvertService : Service() {
         currentValue: Int = current,
         totalValue: Int = total,
         name: String = "",
-        summary: String = ""
+        summary: String = "",
+        path: String = ""
     ) {
         val intent = Intent(action).setPackage(packageName)
         intent.putExtra(EXTRA_OK, ok)
@@ -218,6 +239,7 @@ class ConvertService : Service() {
         intent.putExtra(EXTRA_TOTAL, totalValue)
         intent.putExtra(EXTRA_NAME, name)
         intent.putExtra(EXTRA_SUMMARY, summary)
+        intent.putExtra(EXTRA_PATH, path)
         sendBroadcast(intent)
     }
 

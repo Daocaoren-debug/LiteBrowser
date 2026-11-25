@@ -16,6 +16,7 @@ import android.provider.DocumentsContract
 import android.provider.Settings
 import android.view.View
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
@@ -47,6 +48,8 @@ class M3u8BrowserActivity : Activity() {
     private var savedTreeUri: String? = null
     private var filter = Filter.ALL
     private var lastStatus = ""
+    private var convertedKeys: Set<String> = emptySet()
+    private lateinit var deleteSourceCheck: CheckBox
 
     private val filterButtons: Array<Button> by lazy {
         arrayOf(
@@ -66,6 +69,17 @@ class M3u8BrowserActivity : Activity() {
                     val name = intent.getStringExtra(ConvertService.EXTRA_NAME).orEmpty()
                     countText.text = getString(R.string.convert_progress, current, total, name)
                 }
+                ConvertService.ACTION_REMOVED -> {
+                    // 源 m3u8 已被转换服务删掉，列表里立刻移除，不等下次扫描
+                    val path = intent.getStringExtra(ConvertService.EXTRA_PATH).orEmpty()
+                    if (path.isNotEmpty()) {
+                        val removed = cachedFiles.filter { it.path == path }
+                        cachedFiles = cachedFiles.filterNot { it.path == path }
+                        removed.forEach { ConvertStore.removeSource(applicationContext, it.path) }
+                        ScanStore.save(this@M3u8BrowserActivity, ScanStore.Snapshot(cachedFiles, lastScan, savedTreeUri))
+                        refreshUi()
+                    }
+                }
                 ConvertService.ACTION_DONE -> {
                     val summary = intent.getStringExtra(ConvertService.EXTRA_SUMMARY).orEmpty()
                     AlertDialog.Builder(this@M3u8BrowserActivity)
@@ -83,6 +97,8 @@ class M3u8BrowserActivity : Activity() {
         private const val REQ_STORAGE = 1001
         private const val REQ_MANAGE = 1002
         private const val REQ_TREE = 1003
+        private const val PREFS = "litebrowser_settings"
+        private const val KEY_DELETE_SOURCE = "delete_source_after_convert"
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -93,6 +109,13 @@ class M3u8BrowserActivity : Activity() {
         emptyText = findViewById(R.id.emptyText)
         progress = findViewById(R.id.progress)
         countText = findViewById(R.id.countText)
+        deleteSourceCheck = findViewById(R.id.deleteSourceCheck)
+        deleteSourceCheck.isChecked = getSharedPreferences(PREFS, MODE_PRIVATE)
+            .getBoolean(KEY_DELETE_SOURCE, true)
+        deleteSourceCheck.setOnCheckedChangeListener { _, checked ->
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                .putBoolean(KEY_DELETE_SOURCE, checked).apply()
+        }
 
         adapter = FileAdapter(
             onClick = { openPlayer(it) },
@@ -168,6 +191,7 @@ class M3u8BrowserActivity : Activity() {
         super.onStart()
         registerReceiver(convertReceiver, IntentFilter(ConvertService.ACTION_PROGRESS).apply {
             addAction(ConvertService.ACTION_DONE)
+            addAction(ConvertService.ACTION_REMOVED)
         })
         if (ConvertService.running) {
             countText.text = "视频转换进行中（${ConvertService.current}/${ConvertService.total}）"
@@ -214,7 +238,8 @@ class M3u8BrowserActivity : Activity() {
             Filter.M3U8 -> cachedFiles.filter { it.kind == MediaFile.Kind.M3U8 }
             Filter.MP4 -> cachedFiles.filter { it.kind == MediaFile.Kind.MP4 }
         }
-        adapter.submitList(visible)
+        convertedKeys = ConvertStore.convertedKeys(applicationContext, visible)
+        adapter.submitList(visible, convertedKeys)
         progress.visibility = View.GONE
         emptyText.visibility = if (visible.isEmpty()) View.VISIBLE else View.GONE
         updateCountText()
@@ -231,6 +256,9 @@ class M3u8BrowserActivity : Activity() {
                 cachedFiles.size
             )
         }
+        if (convertedKeys.isNotEmpty()) {
+            lines += "已转换 ${convertedKeys.size} 个（不会再重复转换）"
+        }
         if (adapter.selectionMode) {
             lines += getString(R.string.selection_hint, adapter.selectedCount())
         }
@@ -246,29 +274,47 @@ class M3u8BrowserActivity : Activity() {
     }
 
     private fun convertFiles(files: List<MediaFile>) {
-        val usable = files.filter { it.convertible && File(it.path).exists() }
-        if (usable.isEmpty()) {
-            Toast.makeText(this, getString(R.string.convert_need_file), Toast.LENGTH_LONG).show()
-            return
-        }
-        if (usable.size < files.size) {
-            Toast.makeText(this, getString(R.string.convert_need_file), Toast.LENGTH_LONG).show()
-        }
         if (ConvertService.running) {
             Toast.makeText(this, getString(R.string.convert_running), Toast.LENGTH_SHORT).show()
             return
         }
 
-        val pending = usable.filterNot { File(ConvertService.outputPathOf(it.path)).exists() }
+        // 双重去重：已转换记录 + 同名 mp4 已存在，都不再转第二次
+        val pending = files.filter {
+            it.convertible && File(it.path).exists() &&
+                it.uri.toString() !in convertedKeys &&
+                !File(ConvertService.outputPathOf(it.path)).exists()
+        }
         if (pending.isEmpty()) {
-            Toast.makeText(this, "目标 mp4 都已存在，没有需要转换的文件", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, getString(R.string.convert_no_candidates), Toast.LENGTH_LONG).show()
             return
         }
+        if (pending.size < files.size) {
+            Toast.makeText(this, "已自动跳过转换过的文件", Toast.LENGTH_SHORT).show()
+        }
 
-        val intent = Intent(this, ConvertService::class.java).putStringArrayListExtra(
-            ConvertService.EXTRA_INPUTS,
-            ArrayList(pending.map { it.path })
+        val deleteSource = deleteSourceCheck.isChecked
+        val message = getString(
+            if (deleteSource) R.string.convert_confirm_delete else R.string.convert_confirm_keep,
+            pending.size
         )
+        AlertDialog.Builder(this)
+            .setTitle(getString(R.string.batch_convert))
+            .setMessage(message)
+            .setNegativeButton(getString(R.string.cancel), null)
+            .setPositiveButton(getString(R.string.batch_convert)) { _, _ ->
+                startConvert(pending, deleteSource)
+            }
+            .show()
+    }
+
+    private fun startConvert(pending: List<MediaFile>, deleteSource: Boolean) {
+        val intent = Intent(this, ConvertService::class.java)
+            .putStringArrayListExtra(
+                ConvertService.EXTRA_INPUTS,
+                ArrayList(pending.map { it.path })
+            )
+            .putExtra(ConvertService.EXTRA_DELETE_SOURCE, deleteSource)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(intent)
         } else {
@@ -304,7 +350,15 @@ class M3u8BrowserActivity : Activity() {
                 } else {
                     DocumentsContract.deleteDocument(contentResolver, file.uri)
                 }
-                if (ok) deleted++
+                if (ok) {
+                    deleted++
+                    // 删掉输出 mp4 要让源 m3u8 恢复可转换；删源则清掉对应记录
+                    if (file.kind == MediaFile.Kind.MP4) {
+                        ConvertStore.removeOutput(applicationContext, file.path)
+                    } else {
+                        ConvertStore.removeSource(applicationContext, file.path)
+                    }
+                }
             } catch (e: Exception) {
                 // 单个失败不影响其余文件
             }
