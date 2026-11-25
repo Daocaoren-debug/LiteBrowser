@@ -61,7 +61,8 @@ class ConvertService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val inputs = intent?.getStringArrayListExtra(EXTRA_INPUTS).orEmpty()
+        val inputs: List<String> =
+            intent?.getStringArrayListExtra(EXTRA_INPUTS)?.toList() ?: emptyList()
         if (inputs.isEmpty()) {
             stopSelf()
             return START_NOT_STICKY
