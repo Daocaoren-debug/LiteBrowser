@@ -207,5 +207,4 @@ class DownloadActivity : Activity() {
             lower.endsWith(".mp4") || lower.endsWith(".m4v") ||
             lower.endsWith(".webm") || lower.endsWith(".mkv")
     }
-    }
 }

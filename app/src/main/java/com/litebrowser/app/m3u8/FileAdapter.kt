@@ -126,18 +126,22 @@ class FileAdapter(
         holder.convert.setOnClickListener { onConvert(item) }
         holder.delete.setOnClickListener { onDelete(item) }
 
-        // 防止 RecyclerView 复用时旧回调把图设错行
+        // 防止 RecyclerView 复用时旧回调把图设错行；缩略图异常不能让列表崩溃
         holder.thumb.tag = key
-        val cached = ThumbnailLoader.get(key)
-        if (cached != null) {
-            holder.thumb.setImageBitmap(cached)
-        } else {
-            holder.thumb.setImageResource(android.R.drawable.ic_menu_gallery)
-            ThumbnailLoader.load(holder.itemView.context, item) { bitmap ->
-                if (holder.thumb.tag == key && bitmap != null) {
-                    holder.thumb.setImageBitmap(bitmap)
+        try {
+            val cached = ThumbnailLoader.get(key)
+            if (cached != null && !cached.isRecycled) {
+                holder.thumb.setImageBitmap(cached)
+            } else {
+                holder.thumb.setImageResource(android.R.drawable.ic_menu_gallery)
+                ThumbnailLoader.load(holder.itemView.context, item) { bitmap ->
+                    if (holder.thumb.tag == key && bitmap != null && !bitmap.isRecycled) {
+                        holder.thumb.setImageBitmap(bitmap)
+                    }
                 }
             }
+        } catch (e: Throwable) {
+            holder.thumb.setImageResource(android.R.drawable.ic_menu_gallery)
         }
     }
 

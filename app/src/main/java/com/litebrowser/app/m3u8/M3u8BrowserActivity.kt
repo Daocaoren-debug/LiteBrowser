@@ -64,6 +64,14 @@ class M3u8BrowserActivity : Activity() {
 
     private val convertReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
+            try {
+                handleConvertBroadcast(intent)
+            } catch (e: Throwable) {
+                writeCrash("convertReceiver", e)
+            }
+        }
+
+        private fun handleConvertBroadcast(intent: Intent?) {
             when (intent?.action) {
                 ConvertService.ACTION_PROGRESS -> {
                     val current = intent.getIntExtra(ConvertService.EXTRA_CURRENT, 0)
@@ -142,11 +150,7 @@ class M3u8BrowserActivity : Activity() {
         try {
             initActivity(savedInstanceState)
         } catch (e: Throwable) {
-            try {
-                File(filesDir, "local_video_crash.txt")
-                    .writeText(e.stackTraceToString(), Charsets.UTF_8)
-            } catch (ignored: Exception) {
-            }
+            writeCrash("onCreate", e)
             Toast.makeText(
                 this, "本地视频初始化失败，详情见 local_video_crash.txt", Toast.LENGTH_LONG
             ).show()
@@ -241,12 +245,26 @@ class M3u8BrowserActivity : Activity() {
 
     override fun onStart() {
         super.onStart()
-        registerReceiver(convertReceiver, IntentFilter(ConvertService.ACTION_PROGRESS).apply {
-            addAction(ConvertService.ACTION_DONE)
-            addAction(ConvertService.ACTION_REMOVED)
-        })
-        if (ConvertService.running) {
-            countText.text = "视频转换进行中（${ConvertService.current}/${ConvertService.total}）"
+        try {
+            registerReceiver(convertReceiver, IntentFilter(ConvertService.ACTION_PROGRESS).apply {
+                addAction(ConvertService.ACTION_DONE)
+                addAction(ConvertService.ACTION_REMOVED)
+            })
+            if (ConvertService.running) {
+                countText.text = "视频转换进行中（${ConvertService.current}/${ConvertService.total}）"
+            }
+        } catch (e: Throwable) {
+            writeCrash("onStart", e)
+        }
+    }
+
+    /** 把崩溃堆栈写到文件，便于复现后定位；不打断界面 */
+    private fun writeCrash(where: String, e: Throwable) {
+        try {
+            File(filesDir, "local_video_crash.txt").appendText(
+                "\n=== $where ===\n" + e.stackTraceToString(), Charsets.UTF_8
+            )
+        } catch (ignored: Exception) {
         }
     }
 
@@ -571,6 +589,18 @@ class M3u8BrowserActivity : Activity() {
         grantResults: IntArray
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        try {
+            handlePermissionResult(requestCode, permissions, grantResults)
+        } catch (e: Throwable) {
+            writeCrash("onRequestPermissionsResult", e)
+        }
+    }
+
+    private fun handlePermissionResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
         if (requestCode == REQ_STORAGE) {
             if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
                 startScan(incremental = true)
@@ -599,6 +629,14 @@ class M3u8BrowserActivity : Activity() {
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        try {
+            handleActivityResult(requestCode, resultCode, data)
+        } catch (e: Throwable) {
+            writeCrash("onActivityResult", e)
+        }
+    }
+
+    private fun handleActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         when (requestCode) {
             REQ_MANAGE -> {
                 val toDelete = pendingDelete
@@ -695,15 +733,19 @@ class M3u8BrowserActivity : Activity() {
             ScanStore.save(this, ScanStore.Snapshot(sorted, now, tree))
 
             runOnUiThread {
-                cachedFiles = sorted
-                lastScan = now
-                lastStatus = when {
-                    sorted.isEmpty() -> getString(R.string.m3u8_empty_short)
-                    incremental && found.isEmpty() -> getString(R.string.m3u8_count_no_new, sorted.size)
-                    incremental -> getString(R.string.m3u8_count_with_new, sorted.size, found.size)
-                    else -> getString(R.string.m3u8_count_rescanned, sorted.size)
+                try {
+                    cachedFiles = sorted
+                    lastScan = now
+                    lastStatus = when {
+                        sorted.isEmpty() -> getString(R.string.m3u8_empty_short)
+                        incremental && found.isEmpty() -> getString(R.string.m3u8_count_no_new, sorted.size)
+                        incremental -> getString(R.string.m3u8_count_with_new, sorted.size, found.size)
+                        else -> getString(R.string.m3u8_count_rescanned, sorted.size)
+                    }
+                    refreshUi()
+                } catch (e: Throwable) {
+                    writeCrash("scan.runOnUiThread", e)
                 }
-                refreshUi()
             }
         }
     }

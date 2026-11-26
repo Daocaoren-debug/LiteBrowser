@@ -269,8 +269,7 @@ object ThumbnailLoader {
     private fun resize(source: Bitmap): Bitmap {
         if (source.width <= THUMB_WIDTH) return source
         val height = source.height * THUMB_WIDTH / source.width
-        val out = Bitmap.createScaledBitmap(source, THUMB_WIDTH, height, true)
-        if (out !== source) source.recycle()
-        return out
+        // 不 recycle 源图：缩略图会进 LruCache，recycle 后复用会导致"使用已回收的 bitmap"崩溃
+        return Bitmap.createScaledBitmap(source, THUMB_WIDTH, height, true)
     }
 }
