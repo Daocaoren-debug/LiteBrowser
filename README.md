@@ -22,7 +22,7 @@ https://github.com/Daocaoren-debug/LiteBrowser/releases/download/latest/LiteBrow
 | M3U8 → MP4 | 单个或批量转换：`-c copy` 无损封装，**不重编码，画质不变、体积不增大**；自动补 `aac_adtstoasc`、加 `+faststart`；输出与源文件同目录；前台服务执行，切后台也继续，通知栏看进度。**默认转换成功后删除源 m3u8 及其独占分片（可关闭，二者已合并为一个开关）**；转出的 mp4 会立即加入列表，无需再扫描；同时用「已转换记录 + 同名 mp4 检测」双重去重，即使保留源文件也不会重复转换 |
 | 资源嗅探 | 地址栏右侧 🎬 按钮：双路嗅探本页视频（请求拦截 + 页面内 JS 探针），列出候选地址，点一下进内置播放器 |
 | 内置播放器 | ExoPlayer 内核，支持 m3u8 / mp4 / mpd；**±10 秒快进快退**、**进度条拖动**、**长按左右边缘快进快退**、直播流识别、带 Referer 绕过防盗链、失败可重试。嗅探按钮在网页右下角悬浮 |
-| 文件下载 | 交给系统 `DownloadManager`，断点续传、通知栏进度，被杀进程也不中断；底部工具栏可进下载管理 |
+| 文件下载 | **自研下载服务，不依赖系统 DownloadManager**：纯 `HttpURLConnection`，自动带 Referer/Cookie/UA 应对防盗链；**m3u8 连所有 ts 分片与密钥一起下载**，重写为本地列表后可直接播放/转 mp4；支持断点续传、暂停/继续/取消/重试，进度与状态落盘、被杀后仍可续传；底部工具栏进下载管理 |
 | 网址收藏 | 星标一键收藏，图标即时高亮；收藏夹内可打开、删除 |
 | 历史记录 | 自动记录（同 URL 去重、上限 500 条控制库体积），可打开、单条删除、一键清空 |
 | 其他 | 分享此页、复制链接、用系统浏览器打开、外部链接跳转、错误页、后台回收后恢复原页面 |
@@ -30,7 +30,7 @@ https://github.com/Daocaoren-debug/LiteBrowser/releases/download/latest/LiteBrow
 ## 为什么适合低端机
 
 - **依赖克制**：Media3 播放内核（3 个 aar）+ RecyclerView/DocumentFile/Core + FFmpeg min。没有 Material / OkHttp / 图片库 / 网络框架；不需要 dex 分包，低版本机型无类冲突。FFmpeg 的 so 压缩存放，只有真正用到转换时才加载。
-- **系统下载服务**：下载在独立系统进程完成，App 内不做网络与文件 IO，省内存省电。
+- **自研下载、单线程队列**：下载在自己进程的前台服务里串行执行，纯 `HttpURLConnection`（不引 OkHttp），分片流式写盘不整体进内存；一次只跑一个任务，避免多连接拖垮低端机。
 - **CursorAdapter 直连 SQLite**：收藏/历史列表不把数据一次性读入内存，长列表滑动不卡。
 - **缓存优先 + 禁止自动播放**：`LOAD_DEFAULT` 省流量；媒体需用户手势才播放，避免后台偷跑 CPU/电量。
 - **单窗口模型**：不做多标签，`target="_blank"` 复用同一个 WebView，内存占用约为多标签浏览器的 1/3。
@@ -80,7 +80,12 @@ LiteBrowser/
         │   │   ├── BrowserDatabase.kt       # SQLiteOpenHelper：收藏 + 历史
         │   │   ├── SiteItem.kt              # 数据模型
         │   │   └── SiteCursorAdapter.kt     # Cursor 列表适配器
-        │   ├── download/DownloadHelper.kt   # 系统 DownloadManager 封装
+        │   ├── download/
+        │   │   ├── DownloadHelper.kt        # 下载入口：组装 Referer/Cookie/UA
+        │   │   ├── DownloadService.kt       # 自研下载服务：队列/断点/m3u8 分片/通知
+        │   │   ├── HttpDownloader.kt        # 纯 HttpURLConnection，Range 续传
+        │   │   ├── DownloadStore.kt         # 任务与进度落盘
+        │   │   ├── DownloadActivity.kt / DownloadAdapter.kt  # 下载管理界面
         │   ├── player/
         │   │   ├── MediaSniffer.kt          # 资源嗅探（请求旁听 + JS 探针）
         │   │   └── PlayerActivity.kt        # 内置播放器（ExoPlayer + 自绘控制条）

@@ -1,58 +1,57 @@
 package com.litebrowser.app.download
 
-import android.app.DownloadManager
 import android.content.Context
-import android.net.Uri
-import android.os.Environment
-import android.webkit.URLUtil
+import android.content.Intent
+import android.webkit.CookieManager
+import java.util.HashMap
 
 /**
- * 下载模块：使用系统 DownloadManager。
- * 好处：下载在系统进程执行，不受本应用被杀影响，且我们不需要自己做网络/文件 IO，
- * 极大降低低端机上的内存与电量开销。
+ * 下载入口：把请求交给自研 DownloadService，不再使用系统 DownloadManager。
+ *
+ * 自研的好处：能带 Referer/Cookie 绕过防盗链、支持 m3u8 连分片下载、
+ * 进度/暂停/续传都可控制，且不依赖各厂商对 DownloadManager 的实现差异。
  */
 object DownloadHelper {
 
+    /**
+     * @param referer 当前页面 URL（防盗链关键）
+     * @param userAgent WebView 的 UA
+     */
     fun startDownload(
         context: Context,
         url: String,
+        referer: String?,
         userAgent: String?,
         contentDisposition: String?,
-        mimeType: String?
-    ): Long {
-        // 解析文件名，优先 Content-Disposition，其次 URL 推断
-        val rawName = URLUtil.guessFileName(url, contentDisposition, mimeType)
-        val fileName = sanitizeFileName(rawName)
-
-        val request = DownloadManager.Request(Uri.parse(url)).apply {
-            setTitle(fileName)
-            setDescription("轻览浏览器下载")
-            setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-            if (!userAgent.isNullOrEmpty()) addRequestHeader("User-Agent", userAgent)
-            // 保存到公共 Download 目录；Android 10+ 由系统处理分区存储
-            setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
-            allowScanningByMediaScanner()
+        mimeType: String?,
+        nameHint: String? = null
+    ) {
+        val headers = HashMap<String, String>()
+        if (!referer.isNullOrBlank()) headers["Referer"] = referer
+        if (!userAgent.isNullOrBlank()) headers["User-Agent"] = userAgent
+        // CookieManager 里存着页面的登录态/防盗链 Cookie，一并带上
+        try {
+            val cookie = CookieManager.getInstance().getCookie(url)
+            if (!cookie.isNullOrBlank()) headers["Cookie"] = cookie
+        } catch (e: Exception) {
         }
 
-        val manager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-        return manager.enqueue(request)
-    }
-
-    /** 去掉文件名中的非法字符并限制长度，避免部分机型上 enqueue 失败 */
-    private fun sanitizeFileName(name: String): String {
-        var result = name.replace("[\\\\/:*?\"<>|]".toRegex(), "_").trim()
-        if (result.isEmpty() || result == "." || result == "..") {
-            result = "download_${System.currentTimeMillis()}"
-        }
-        if (result.length > 120) {
-            // 尽量保留扩展名
-            val dot = result.lastIndexOf('.')
-            result = if (dot > 0 && result.length - dot <= 10) {
-                result.take(120 - (result.length - dot)) + result.substring(dot)
-            } else {
-                result.take(120)
+        // Content-Disposition 常是 "attachment; filename=xxx.mp4"，取出 filename
+        val hint = nameHint?.takeIf { it.isNotBlank() }
+            ?: contentDisposition?.let { disp ->
+                Regex("filename\\*?=(?:\"?UTF-8\"?\'\')?\"?([^\";]+)", RegexOption.IGNORE_CASE)
+                    .find(disp)?.groupValues?.getOrNull(1)?.trim('"')
             }
+        val intent = Intent(context, DownloadService::class.java).apply {
+            action = DownloadService.ACTION_ADD
+            putExtra(DownloadService.EXTRA_URL, url)
+            putExtra(DownloadService.EXTRA_NAME, hint.orEmpty())
+            putExtra(DownloadService.EXTRA_HEADERS, headers)
         }
-        return result
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            context.startForegroundService(intent)
+        } else {
+            context.startService(intent)
+        }
     }
 }

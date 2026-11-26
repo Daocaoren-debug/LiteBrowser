@@ -5,7 +5,7 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- 用于判断网络可用性，无网络时给出提示，避免低端机上无谓加载 -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-    <!-- DownloadManager 写入公共下载目录，Android 9 及以下需要 -->
+    <!-- 自研下载写入公共 Download 目录，Android 9 及以下需要 -->
     <uses-permission
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28" />
@@ -80,6 +80,30 @@
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|smallestScreenSize|uiMode"
             android:exported="false"
             android:theme="@android:style/Theme.Material.NoActionBar.Fullscreen" />
+
+        <!-- 下载管理界面 -->
+        <activity
+            android:name=".download.DownloadActivity"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode"
+            android:exported="false"
+            android:label="@string/downloads" />
+
+        <!-- 自研下载服务：HttpURLConnection，支持 m3u8 分片、断点续传、防盗链 -->
+        <service
+            android:name=".download.DownloadService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <!-- 分享已下载文件给播放器 -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
 
         <!-- m3u8 -> mp4 无损封装转换；前台服务保证切后台后仍能跑完 -->
         <service

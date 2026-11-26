@@ -4,7 +4,6 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.AlertDialog
-import android.app.DownloadManager
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -69,12 +68,13 @@ class MainActivity : Activity() {
     private var lastBackPress = 0L
     private var pendingDownload: DownloadTask? = null
 
-    /** 下载参数：Android 8/9 授权后需要用它继续下载，所以先暂存整个请求 */
+    /** 下载参数：授权后需要用它继续下载，所以先暂存整个请求；referer 供防盗链使用 */
     private data class DownloadTask(
         val url: String,
         val userAgent: String?,
         val contentDisposition: String?,
-        val mimeType: String?
+        val mimeType: String?,
+        val referer: String?
     )
 
     companion object {
@@ -534,7 +534,7 @@ class MainActivity : Activity() {
             return
         }
 
-        val task = DownloadTask(url, userAgent, contentDisposition, mimeType)
+        val task = DownloadTask(url, userAgent, contentDisposition, mimeType, webView.url)
 
         if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P &&
             checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED
@@ -568,7 +568,8 @@ class MainActivity : Activity() {
     private fun startDownload(task: DownloadTask) {
         try {
             DownloadHelper.startDownload(
-                this, task.url, task.userAgent, task.contentDisposition, task.mimeType
+                this, task.url, task.referer, task.userAgent,
+                task.contentDisposition, task.mimeType
             )
             toast(getString(R.string.download_started))
         } catch (e: Exception) {
@@ -598,7 +599,7 @@ class MainActivity : Activity() {
 
     private fun openDownloads() {
         try {
-            startActivity(Intent(DownloadManager.ACTION_VIEW_DOWNLOADS))
+            startActivity(Intent(this, com.litebrowser.app.download.DownloadActivity::class.java))
         } catch (e: Exception) {
             toast(getString(R.string.download_manager_missing))
         }

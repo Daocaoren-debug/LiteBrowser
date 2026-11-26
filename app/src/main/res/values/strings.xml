@@ -37,13 +37,17 @@
     <string name="link_copied">链接已复制</string>
     <string name="no_app_for_link">没有可处理该链接的应用</string>
 
-    <!-- 下载 -->
+    <!-- 下载（自研，不依赖系统 DownloadManager） -->
     <string name="downloads">下载管理</string>
-    <string name="download_started">已开始下载</string>
-    <string name="download_failed">下载失败，请换一个链接试试</string>
-    <string name="download_unsupported">该链接不支持下载（可能是网页内嵌视频）</string>
-    <string name="download_manager_missing">无法打开系统下载管理</string>
+    <string name="download_started">已开始下载，可在下载管理查看进度</string>
+    <string name="download_failed">下载启动失败，请重试</string>
+    <string name="download_unsupported">该链接不支持下载（blob:/data: 只在页面内有效）</string>
+    <string name="download_manager_missing">无法打开下载管理</string>
     <string name="permission_denied">没有存储权限，无法下载</string>
+    <string name="download_empty">暂无下载任务</string>
+    <string name="download_not_ready">任务还没完成，暂时无法打开</string>
+    <string name="download_file_missing">文件已不存在，可能已被手动删除</string>
+    <string name="download_no_player">没有可打开该文件的应用</string>
 
     <!-- 资源嗅探 -->
     <string name="sniff">嗅探视频</string>
@@ -118,5 +122,5 @@
     <string name="error_page_title">页面打不开</string>
     <string name="error_page_hint">请检查网络或网址后重试，也可以点下方刷新按钮</string>
     <string name="press_again_to_exit">再按一次返回键退出</string>
-    <string name="about_message">轻览浏览器 v1.4.7\n基于系统 WebView 的轻量浏览器，仅播放与列表使用少量 AndroidX/Media3，并内置 FFmpeg 用于视频封装转换。\n\n功能：网页浏览、网页视频全屏、资源嗅探 + 内置播放器（快进快退/拖动进度/长按边缘快进）、本地 m3u8/mp4 扫描播放（手动横竖屏）、m3u8→mp4 无损转换（批量、去重、删源自动清理分片）、文件下载、网址收藏、历史记录、分享与复制链接。\n\nFFmpeg 采用 LGPL-3.0 许可，详见仓库 THIRD_PARTY_NOTICES.md。</string>
+    <string name="about_message">轻览浏览器 v1.5.0\n基于系统 WebView 的轻量浏览器，仅播放与列表使用少量 AndroidX/Media3，并内置 FFmpeg 用于视频封装转换。\n\n功能：网页浏览、网页视频全屏、资源嗅探 + 内置播放器（快进快退/拖动进度/长按边缘快进）、本地 m3u8/mp4 扫描播放（手动横竖屏）、m3u8→mp4 无损转换（批量、去重、删源自动清理分片）、自研下载（m3u8 连分片/断点续传/防盗链）、网址收藏、历史记录、分享与复制链接。\n\nFFmpeg 采用 LGPL-3.0 许可，详见仓库 THIRD_PARTY_NOTICES.md。</string>
 </resources>
