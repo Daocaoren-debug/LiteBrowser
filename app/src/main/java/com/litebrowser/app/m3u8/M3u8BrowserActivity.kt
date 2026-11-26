@@ -139,6 +139,22 @@ class M3u8BrowserActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        try {
+            initActivity(savedInstanceState)
+        } catch (e: Throwable) {
+            try {
+                File(filesDir, "local_video_crash.txt")
+                    .writeText(e.stackTraceToString(), Charsets.UTF_8)
+            } catch (ignored: Exception) {
+            }
+            Toast.makeText(
+                this, "本地视频初始化失败，详情见 local_video_crash.txt", Toast.LENGTH_LONG
+            ).show()
+            finish()
+        }
+    }
+
+    private fun initActivity(savedInstanceState: Bundle?) {
         setContentView(R.layout.activity_m3u8_browser)
 
         recyclerView = findViewById(R.id.recyclerView)

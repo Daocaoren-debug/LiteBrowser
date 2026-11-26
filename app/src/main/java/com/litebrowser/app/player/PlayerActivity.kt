@@ -472,6 +472,9 @@ class PlayerActivity : Activity() {
             mimeType = null,
             nameHint = videoTitle
         )
+        android.widget.Toast.makeText(
+            this, getString(R.string.download_added), android.widget.Toast.LENGTH_SHORT
+        ).show()
     }
 
     @Suppress("DEPRECATION")

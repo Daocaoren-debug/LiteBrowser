@@ -41,14 +41,16 @@ class DownloadAdapter(
         val item = items[position]
         holder.name.text = item.name
 
-        val (statusText, a1, a2) = when (item.state) {
-            DownloadStore.State.QUEUED -> Triple("排队中", "暂停" to "pause", "取消" to "cancel")
-            DownloadStore.State.RUNNING -> Triple("下载中 ${item.progress}%", "暂停" to "pause", "取消" to "cancel")
-            DownloadStore.State.PAUSED -> Triple("已暂停 ${item.progress}%", "继续" to "resume", "取消" to "cancel")
-            DownloadStore.State.DONE -> Triple("完成" + if (item.message.isNotBlank()) " · ${item.message}" else "", "打开" to "open", "重试" to "retry")
-            DownloadStore.State.FAILED -> Triple("失败：${item.message}", "重试" to "retry", "取消" to "cancel")
-            DownloadStore.State.CANCELED -> Triple("已取消", "重试" to "retry", "删除" to "remove")
+        // 第二个按钮统一为"删除任务"，点后弹窗可选是否同时删除已下载的文件
+        val (statusText, a1) = when (item.state) {
+            DownloadStore.State.QUEUED -> "排队中" to ("暂停" to "pause")
+            DownloadStore.State.RUNNING -> "下载中 ${item.progress}%" to ("暂停" to "pause")
+            DownloadStore.State.PAUSED -> "已暂停 ${item.progress}%" to ("继续" to "resume")
+            DownloadStore.State.DONE -> ("完成" + if (item.message.isNotBlank()) " · ${item.message}" else "") to ("打开" to "open")
+            DownloadStore.State.FAILED -> "失败：${item.message}" to ("重试" to "retry")
+            DownloadStore.State.CANCELED -> "已取消" to ("重试" to "retry")
         }
+        val a2 = "删除" to "remove"
         holder.status.text = statusText
         holder.size.text = formatSize(item.bytes, item.total)
         holder.progress.max = 100

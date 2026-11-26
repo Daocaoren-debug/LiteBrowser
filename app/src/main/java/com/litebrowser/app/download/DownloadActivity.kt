@@ -1,6 +1,7 @@
 package com.litebrowser.app.download
 
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -107,19 +108,59 @@ class DownloadActivity : Activity() {
                 },
                 task
             )
-            "remove" -> {
-                // 已取消：从列表移除，删掉半成品
-                val tasks = DownloadStore.load(this)
-                tasks.removeAll { it.id == task.id }
-                DownloadStore.save(this, tasks)
-                try {
-                    File(task.targetPath).delete()
-                } catch (e: Exception) {
-                }
-                refresh()
-            }
+            "remove" -> askRemove(task)
             "open" -> openTask(task)
         }
+    }
+
+    /** 删除任务：先取消正在进行的下载，弹窗可选是否同时删除已下载的文件 */
+    private fun askRemove(task: DownloadStore.Task) {
+        val view = android.view.LayoutInflater.from(this)
+            .inflate(R.layout.dialog_remove_download, null)
+        val check = view.findViewById<android.widget.CheckBox>(R.id.removeFileCheck)
+        val file = File(task.targetPath)
+        val hasFile = file.exists()
+        if (!hasFile) {
+            check.isChecked = false
+            check.isEnabled = false
+        }
+        AlertDialog.Builder(this)
+            .setTitle(getString(R.string.remove_download_title))
+            .setView(view)
+            .setNegativeButton(getString(R.string.cancel), null)
+            .setPositiveButton(getString(R.string.delete)) { _, _ ->
+                removeTask(task, hasFile && check.isChecked)
+            }
+            .show()
+    }
+
+    private fun removeTask(task: DownloadStore.Task, deleteFile: Boolean) {
+        // 正在下载/排队时先取消，避免服务继续写文件
+        if (task.state == DownloadStore.State.RUNNING ||
+            task.state == DownloadStore.State.QUEUED ||
+            task.state == DownloadStore.State.PAUSED
+        ) {
+            command(DownloadService.ACTION_CANCEL, task)
+        }
+        val tasks = DownloadStore.load(this)
+        tasks.removeAll { it.id == task.id }
+        DownloadStore.save(this, tasks)
+        if (deleteFile) {
+            try {
+                File(task.targetPath).delete()
+                // m3u8 的 ts 分片目录一并清理
+                if (task.m3u8) {
+                    val dir = File(
+                        File(task.targetPath).parentFile,
+                        File(task.targetPath).name.substringBeforeLast('.') + "_contents"
+                    )
+                    dir.listFiles()?.forEach { it.delete() }
+                    dir.delete()
+                }
+            } catch (e: Exception) {
+            }
+        }
+        refresh()
     }
 
     private fun openTask(task: DownloadStore.Task) {
