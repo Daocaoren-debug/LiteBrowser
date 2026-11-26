@@ -267,11 +267,13 @@ class PlayerActivity : Activity() {
         releasePlayer()
 
         val headers = HashMap<String, String>()
-        if (!videoReferer.isNullOrEmpty()) headers["Referer"] = videoReferer
-        if (!videoUa.isNullOrEmpty()) headers["User-Agent"] = videoUa
+        val referer = videoReferer
+        val ua = videoUa
+        if (!referer.isNullOrEmpty()) headers["Referer"] = referer
+        if (!ua.isNullOrEmpty()) headers["User-Agent"] = ua
 
         val dataSourceFactory = DefaultHttpDataSource.Factory()
-            .setUserAgent(if (videoUa.isNullOrEmpty()) UA_FALLBACK else videoUa)
+            .setUserAgent(if (ua.isNullOrEmpty()) UA_FALLBACK else ua)
             .setAllowCrossProtocolRedirects(true)   // 很多站点 http -> https 跳转
             .setDefaultRequestProperties(headers)
 
