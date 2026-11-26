@@ -14,6 +14,26 @@ object DownloadStore {
 
     enum class State { QUEUED, RUNNING, PAUSED, DONE, FAILED, CANCELED }
 
+    /** 还在进行中的状态：同 URL 命中这些状态时不再重复建任务 */
+    val ACTIVE_STATES = setOf(State.QUEUED, State.RUNNING, State.PAUSED)
+
+    /**
+     * 下载目录：统一放到应用专属外部存储的 Download 下。
+     * 好处是任何版本都不需要存储权限就能写，且本应用能直接扫描/播放。
+     * 注意它在 Android/data 里，公共扫描会跳过，所以本地视频库要显式补扫这个目录。
+     */
+    fun dir(context: Context): File {
+        val base = context.getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS)
+            ?: File(context.filesDir, "downloads")
+        base.mkdirs()
+        return base
+    }
+
+    /** 同 URL 的任务（用于去重）：优先返回仍在进行中的那条，其次是最新一条 */
+    fun findByUrl(tasks: List<Task>, url: String): Task? =
+        tasks.firstOrNull { it.url == url && it.state in ACTIVE_STATES }
+            ?: tasks.lastOrNull { it.url == url }
+
     data class Task(
         val id: Long,
         val url: String,

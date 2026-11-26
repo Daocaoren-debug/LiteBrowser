@@ -463,7 +463,8 @@ class PlayerActivity : Activity() {
             ).show()
             return
         }
-        DownloadHelper.startDownload(
+        // 同一个视频点了多次只入队一次，返回结果用来给准确提示
+        val status = DownloadHelper.startDownload(
             context = this,
             url = mediaUrl,
             referer = videoReferer,
@@ -472,8 +473,14 @@ class PlayerActivity : Activity() {
             mimeType = null,
             nameHint = videoTitle
         )
+        val message = when (status) {
+            DownloadHelper.Status.STARTED -> R.string.download_added
+            DownloadHelper.Status.ALREADY_DOWNLOADING -> R.string.download_duplicate_active
+            DownloadHelper.Status.ALREADY_DONE -> R.string.download_duplicate_done
+            DownloadHelper.Status.FAILED -> R.string.download_failed
+        }
         android.widget.Toast.makeText(
-            this, getString(R.string.download_added), android.widget.Toast.LENGTH_SHORT
+            this, getString(message), android.widget.Toast.LENGTH_SHORT
         ).show()
     }
 

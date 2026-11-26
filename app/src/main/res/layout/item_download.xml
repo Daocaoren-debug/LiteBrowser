@@ -28,6 +28,17 @@
         android:textColor="#666666"
         android:textSize="12sp" />
 
+    <!-- 保存位置：长按任务可复制完整路径 -->
+    <TextView
+        android:id="@+id/dlPath"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:ellipsize="middle"
+        android:maxLines="1"
+        android:paddingTop="2dp"
+        android:textColor="#9E9E9E"
+        android:textSize="11sp" />
+
     <ProgressBar
         android:id="@+id/dlProgress"
         style="?android:attr/progressBarStyleHorizontal"

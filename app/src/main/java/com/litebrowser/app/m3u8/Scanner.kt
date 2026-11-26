@@ -24,7 +24,26 @@ object Scanner {
     fun scanStorage(knownPaths: Set<String>, since: Long): List<MediaFile> {
         val result = ArrayList<MediaFile>()
         val root = Environment.getExternalStorageDirectory()
-        traverse(root, result, 0, knownPaths, since)
+        traverse(root, result, 0, knownPaths, since, MAX_DEPTH)
+        return result
+    }
+
+    private const val MAX_DEPTH = 12
+
+    /**
+     * 扫描单个目录（默认只看这一层）。
+     *
+     * 用在应用专属下载目录：它在 Android/data 下，公共存储遍历会跳过，
+     * 但它本来就是本应用下载的视频，必须补扫，否则"下载完在本地视频库里找不到"。
+     */
+    fun scanDirectory(dir: File, knownPaths: Set<String>, maxDepth: Int = 1): List<MediaFile> {
+        val result = ArrayList<MediaFile>()
+        try {
+            if (dir.exists() && dir.isDirectory) {
+                traverse(dir, result, 0, knownPaths, 0L, maxDepth)
+            }
+        } catch (e: Exception) {
+        }
         return result
     }
 
@@ -38,9 +57,10 @@ object Scanner {
         out: MutableList<MediaFile>,
         depth: Int,
         knownPaths: Set<String>,
-        since: Long
+        since: Long,
+        maxDepth: Int
     ) {
-        if (depth > 12) return
+        if (depth >= maxDepth) return
 
         // 不做目录 mtime 剪枝：深层目录里新建的文件不会更新祖先目录 mtime，
         // 剪枝会漏掉新转出的 mp4。文件级去重（knownPaths）已足够。
@@ -56,7 +76,7 @@ object Scanner {
                 if (file.isDirectory) {
                     val n = file.name
                     if (n.startsWith(".") || n in SKIP_DIRS) continue
-                    traverse(file, out, depth + 1, knownPaths, since)
+                    traverse(file, out, depth + 1, knownPaths, since, maxDepth)
                 } else {
                     val lower = file.name.lowercase()
                     if (!isMediaName(lower)) continue

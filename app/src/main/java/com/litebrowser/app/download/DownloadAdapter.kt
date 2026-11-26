@@ -1,13 +1,18 @@
 package com.litebrowser.app.download
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.ProgressBar
 import android.widget.TextView
+import android.widget.Toast
 import androidx.recyclerview.widget.RecyclerView
 import com.litebrowser.app.R
+import java.io.File
 
 class DownloadAdapter(
     private val onAction: (DownloadStore.Task, String) -> Unit,
@@ -19,6 +24,7 @@ class DownloadAdapter(
     class ViewHolder(view: View) : RecyclerView.ViewHolder(view) {
         val name: TextView = view.findViewById(R.id.dlName)
         val status: TextView = view.findViewById(R.id.dlStatus)
+        val path: TextView = view.findViewById(R.id.dlPath)
         val size: TextView = view.findViewById(R.id.dlSize)
         val progress: ProgressBar = view.findViewById(R.id.dlProgress)
         val action1: Button = view.findViewById(R.id.dlAction1)
@@ -52,6 +58,9 @@ class DownloadAdapter(
         }
         val a2 = "删除" to "remove"
         holder.status.text = statusText
+        holder.path.text = holder.itemView.context.getString(
+            R.string.download_path, prettyPath(File(item.targetPath).parent.orEmpty())
+        )
         holder.size.text = formatSize(item.bytes, item.total)
         holder.progress.max = 100
         holder.progress.progress = if (item.total > 0) item.progress else 0
@@ -64,9 +73,29 @@ class DownloadAdapter(
         }
         holder.action2.setOnClickListener { onAction(item, a2.second) }
         holder.itemView.setOnClickListener { onOpen(item) }
+        // 长按复制完整保存路径，方便去文件管理器找
+        holder.itemView.setOnLongClickListener {
+            copyPath(holder.itemView.context, item.targetPath)
+            true
+        }
     }
 
     override fun getItemCount(): Int = items.size
+
+    /** 路径太长时只保留尾部，界面上一行放得下；完整路径长按可复制 */
+    private fun prettyPath(dir: String): String {
+        val readable = dir.replace("/storage/emulated/0", "内部存储")
+        return if (readable.length > 40) "…" + readable.takeLast(39) else readable
+    }
+
+    private fun copyPath(context: Context, path: String) {
+        try {
+            val manager = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            manager.setPrimaryClip(ClipData.newPlainText("path", path))
+            Toast.makeText(context, R.string.download_path_copied, Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+        }
+    }
 
     private fun formatSize(bytes: Long, total: Long): String {
         fun fmt(b: Long) = when {

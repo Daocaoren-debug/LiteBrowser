@@ -236,9 +236,10 @@ class M3u8BrowserActivity : Activity() {
         }
         refreshUi()
 
-        if (hasStoragePermission() || !savedTreeUri.isNullOrEmpty()) {
-            startScan(incremental = true)
-        } else {
+        // 应用自己的下载目录不需要存储权限，先扫一次把已下载的视频显示出来；
+        // 公共存储没授权时再单独申请，授权回来后 onActivityResult 会全量补扫
+        startScan(incremental = true)
+        if (!hasStoragePermission() && savedTreeUri.isNullOrEmpty()) {
             requestStoragePermission()
         }
     }
@@ -691,10 +692,8 @@ class M3u8BrowserActivity : Activity() {
     /** @param incremental true 只找新增，false 全量重扫 */
     private fun startScan(incremental: Boolean) {
         val tree = savedTreeUri
-        if (tree.isNullOrEmpty() && !hasStoragePermission()) {
-            requestStoragePermission()
-            return
-        }
+        // 公共存储要权限；但本应用自己的下载目录不需要，所以没权限也先把下载的视频显示出来
+        val canScanPublic = !(tree.isNullOrEmpty() && !hasStoragePermission())
 
         val since = if (incremental) lastScan else 0L
         val knownPaths = if (incremental) {
@@ -711,14 +710,29 @@ class M3u8BrowserActivity : Activity() {
 
         executor.execute {
             val found = ArrayList<MediaFile>()
-            try {
-                if (!tree.isNullOrEmpty()) {
-                    walkTree(DocumentFile.fromTreeUri(this, Uri.parse(tree)), found, 0, knownUris, since)
-                } else {
-                    found.addAll(Scanner.scanStorage(knownPaths, since))
+            if (canScanPublic) {
+                try {
+                    if (!tree.isNullOrEmpty()) {
+                        walkTree(
+                            DocumentFile.fromTreeUri(this, Uri.parse(tree)),
+                            found, 0, knownUris, since
+                        )
+                    } else {
+                        found.addAll(Scanner.scanStorage(knownPaths, since))
+                    }
+                } catch (e: Exception) {
+                    // 遍历异常不影响已找到的结果
                 }
+            }
+            // 应用自己的下载目录在 Android/data 下，公共遍历会跳过，这里显式补扫，
+            // 否则新下载的视频在本地视频库里看不到
+            try {
+                found.addAll(
+                    Scanner.scanDirectory(
+                        com.litebrowser.app.download.DownloadStore.dir(this), knownPaths
+                    )
+                )
             } catch (e: Exception) {
-                // 遍历异常不影响已找到的结果
             }
 
             val now = System.currentTimeMillis()

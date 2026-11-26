@@ -575,11 +575,17 @@ class MainActivity : Activity() {
 
     private fun startDownload(task: DownloadTask) {
         try {
-            DownloadHelper.startDownload(
+            val status = DownloadHelper.startDownload(
                 this, task.url, task.referer, task.userAgent,
                 task.contentDisposition, task.mimeType
             )
-            toast(getString(R.string.download_started))
+            val message = when (status) {
+                DownloadHelper.Status.STARTED -> R.string.download_started
+                DownloadHelper.Status.ALREADY_DOWNLOADING -> R.string.download_duplicate_active
+                DownloadHelper.Status.ALREADY_DONE -> R.string.download_duplicate_done
+                DownloadHelper.Status.FAILED -> R.string.download_failed
+            }
+            toast(getString(message))
         } catch (e: Exception) {
             toast(getString(R.string.download_failed))
         }

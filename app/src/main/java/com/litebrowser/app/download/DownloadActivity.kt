@@ -89,10 +89,16 @@ class DownloadActivity : Activity() {
     }
 
     private fun command(action: String, task: DownloadStore.Task) {
-        startService(Intent(this, DownloadService::class.java).apply {
-            this.action = action
-            putExtra(DownloadService.EXTRA_ID, task.id)
-        })
+        try {
+            // 控制指令（暂停/继续/取消/重试）用 startService：Activity 在前台时合法，
+            // 也不会因为没来得及 startForeground 被系统判成崩溃
+            startService(Intent(this, DownloadService::class.java).apply {
+                this.action = action
+                putExtra(DownloadService.EXTRA_ID, task.id)
+            })
+        } catch (e: Exception) {
+            Toast.makeText(this, R.string.download_failed, Toast.LENGTH_SHORT).show()
+        }
     }
 
     private fun handleAction(task: DownloadStore.Task, action: String) {

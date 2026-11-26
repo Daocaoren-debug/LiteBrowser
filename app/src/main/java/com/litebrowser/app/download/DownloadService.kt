@@ -11,6 +11,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.IBinder
+import android.os.SystemClock
 import androidx.core.app.NotificationCompat
 import java.io.File
 import java.net.URI
@@ -46,6 +47,9 @@ class DownloadService : Service() {
         private const val CHANNEL = "download"
         private const val NOTIFY_ID = 2027
 
+        /** 进度落盘/广播的最小间隔：太频繁会把主线程刷爆，按钮就点不动了 */
+        private const val PROGRESS_INTERVAL_MS = 350L
+
         @Volatile
         var running = false
     }
@@ -55,6 +59,12 @@ class DownloadService : Service() {
     private val pauseFlags = ConcurrentHashMap<Long, AtomicBoolean>()
     private val cancelFlags = ConcurrentHashMap<Long, AtomicBoolean>()
 
+    /** 多个线程（工作线程 / 主线程指令）都会读写任务文件，必须串行化，否则状态会互相覆盖 */
+    private val storeLock = Any()
+    private var lastReportAt = 0L
+    @Volatile
+    private var currentName: String = ""
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -63,47 +73,66 @@ class DownloadService : Service() {
                 val url = intent.getStringExtra(EXTRA_URL).orEmpty()
                 if (url.isNotBlank()) addTask(intent, url)
             }
-            ACTION_PAUSE -> {
-                val id = intent.getLongExtra(EXTRA_ID, -1L)
-                pauseFlags[id]?.set(true)
-                setPaused(id)
-            }
-            ACTION_RESUME -> {
-                val id = intent.getLongExtra(EXTRA_ID, -1L)
-                val task = findTask(id)
-                if (task != null && task.state == DownloadStore.State.PAUSED) {
-                    task.state = DownloadStore.State.QUEUED
-                    task.message = ""
-                    pauseFlags[id]?.set(false)
-                    save()
-                    broadcast()
-                    worker.post { pump() }
-                }
-            }
+            ACTION_PAUSE -> pause(intent.getLongExtra(EXTRA_ID, -1L))
+            ACTION_RESUME -> resume(intent.getLongExtra(EXTRA_ID, -1L))
             ACTION_CANCEL -> {
                 val id = intent.getLongExtra(EXTRA_ID, -1L)
-                cancelFlags[id]?.set(true)
-                pauseFlags[id]?.set(false)
+                cancelFlags.getOrPut(id) { AtomicBoolean(false) }.set(true)
+                pauseFlags.getOrPut(id) { AtomicBoolean(false) }.set(false)
                 val task = findTask(id)
                 if (task != null && task.state != DownloadStore.State.RUNNING) {
                     finishCanceled(task)
+                } else if (task != null) {
+                    // 正在下载：立即置为已取消，下载线程在下一个数据块处退出
+                    updateTask(id) {
+                        state = DownloadStore.State.CANCELED
+                        message = "已取消"
+                    }
                 }
             }
             ACTION_RETRY -> {
                 val id = intent.getLongExtra(EXTRA_ID, -1L)
                 val task = findTask(id)
-                if (task != null) {
-                    task.state = DownloadStore.State.QUEUED
-                    task.message = ""
-                    pauseFlags[id]?.set(false)
-                    cancelFlags[id]?.set(false)
-                    save()
-                    broadcast()
+                if (task != null &&
+                    task.state != DownloadStore.State.QUEUED &&
+                    task.state != DownloadStore.State.RUNNING
+                ) {
+                    pauseFlags[id] = AtomicBoolean(false)
+                    cancelFlags[id] = AtomicBoolean(false)
+                    updateTask(id) {
+                        state = DownloadStore.State.QUEUED
+                        message = ""
+                    }
+                    ensureForeground()
                     worker.post { pump() }
                 }
             }
         }
         return START_NOT_STICKY
+    }
+
+    /** 暂停：立刻落盘并广播，界面马上有反馈；下载线程在下一个数据块处自行退出 */
+    private fun pause(id: Long) {
+        pauseFlags.getOrPut(id) { AtomicBoolean(false) }.set(true)
+        updateTask(id) {
+            if (state == DownloadStore.State.QUEUED || state == DownloadStore.State.RUNNING) {
+                state = DownloadStore.State.PAUSED
+                message = "已暂停"
+            }
+        }
+    }
+
+    private fun resume(id: Long) {
+        val task = findTask(id) ?: return
+        if (task.state != DownloadStore.State.PAUSED && task.state != DownloadStore.State.FAILED) return
+        pauseFlags[id] = AtomicBoolean(false)
+        cancelFlags[id] = AtomicBoolean(false)
+        updateTask(id) {
+            state = DownloadStore.State.QUEUED
+            message = ""
+        }
+        ensureForeground()
+        worker.post { pump() }
     }
 
     override fun onCreate() {
@@ -120,14 +149,12 @@ class DownloadService : Service() {
         }
         if (changed) DownloadStore.save(this, tasks)
         if (tasks.any { it.state == DownloadStore.State.QUEUED }) {
-            startForeground(NOTIFY_ID, notification("准备下载", 0, 0))
-            running = true
+            ensureForeground()
             worker.post { pump() }
         }
     }
 
     private fun addTask(intent: Intent, url: String) {
-        val tasks = DownloadStore.load(this)
         val headers = HashMap<String, String>()
         (intent.getSerializableExtra(EXTRA_HEADERS) as? HashMap<*, *>)?.forEach { (k, v) ->
             if (k is String && v is String) headers[k] = v
@@ -135,42 +162,87 @@ class DownloadService : Service() {
         val referenceName = intent.getStringExtra(EXTRA_NAME).orEmpty()
         val isM3u8 = url.contains(".m3u8", ignoreCase = true) ||
             intent.getBooleanExtra(EXTRA_M3U8, false)
-        var name = sanitize(
-            if (referenceName.isNotBlank()) referenceName else guessName(url, isM3u8)
-        )
-        // 嗅探到的标题通常是纯文字（无后缀），补上扩展名，否则下载完系统/内置播放器都认不出
-        val hasVideoExt = listOf(".mp4", ".m4v", ".m3u8", ".m3u", ".webm", ".mkv", ".flv", ".mov")
-            .any { name.endsWith(it, ignoreCase = true) }
-        if (!hasVideoExt) {
-            val ext = if (isM3u8) {
-                ".m3u8"
-            } else if (looksLikeVideoUrl(url)) {
-                ".mp4"
-            } else {
-                ""
+
+        val task = synchronized(storeLock) {
+            val tasks = DownloadStore.load(this)
+
+            // 去重：同一链接已在队列/下载/暂停中，直接忽略（连点下载按钮不再重复入队）
+            if (tasks.any { it.url == url && it.state in DownloadStore.ACTIVE_STATES }) return
+            // 已下载完成且文件还在，也没必要再下一遍
+            if (tasks.any {
+                    it.url == url && it.state == DownloadStore.State.DONE &&
+                        File(it.targetPath).exists()
+                }
+            ) return
+
+            var name = sanitize(
+                if (referenceName.isNotBlank()) referenceName else guessName(url, isM3u8)
+            )
+            // 嗅探到的标题通常是纯文字（无后缀），补上扩展名，否则下载完系统/内置播放器都认不出
+            val hasVideoExt =
+                listOf(".mp4", ".m4v", ".m3u8", ".m3u", ".webm", ".mkv", ".flv", ".mov")
+                    .any { name.endsWith(it, ignoreCase = true) }
+            if (!hasVideoExt) {
+                val ext = when {
+                    isM3u8 -> ".m3u8"
+                    looksLikeVideoUrl(url) -> ".mp4"
+                    else -> ""
+                }
+                if (ext.isNotEmpty()) name += ext
             }
-            if (ext.isNotEmpty()) name += ext
+            name = uniqueName(tasks, name)
+
+            val created = DownloadStore.Task(
+                id = DownloadStore.nextId(tasks),
+                url = url,
+                name = name,
+                targetPath = File(DownloadStore.dir(this), name).absolutePath,
+                headers = headers,
+                m3u8 = isM3u8
+            )
+            tasks.add(created)
+            DownloadStore.save(this, tasks)
+            created
         }
-        val task = DownloadStore.Task(
-            id = DownloadStore.nextId(tasks),
-            url = url,
-            name = name,
-            targetPath = File(downloadDir(), name).absolutePath,
-            headers = headers,
-            m3u8 = isM3u8
-        )
-        tasks.add(task)
-        DownloadStore.save(this, tasks)
         pauseFlags[task.id] = AtomicBoolean(false)
         cancelFlags[task.id] = AtomicBoolean(false)
-        startForeground(NOTIFY_ID, notification("准备下载", 0, 0))
-        running = true
+        ensureForeground()
         broadcast()
         worker.post { pump() }
     }
 
+    /** 同名文件/同名任务自动加序号，避免两个视频互相覆盖 */
+    private fun uniqueName(tasks: List<DownloadStore.Task>, name: String): String {
+        val dir = DownloadStore.dir(this)
+        val used = tasks.filter { it.state != DownloadStore.State.CANCELED }
+            .map { it.targetPath }.toHashSet()
+        var candidate = name
+        var index = 2
+        while (index < 1000 &&
+            (File(dir, candidate).exists() || used.contains(File(dir, candidate).absolutePath))
+        ) {
+            val dot = name.lastIndexOf('.')
+            candidate = if (dot > 0) {
+                name.substring(0, dot) + " ($index)" + name.substring(dot)
+            } else {
+                "$name ($index)"
+            }
+            index++
+        }
+        return candidate
+    }
+
+    private fun ensureForeground() {
+        try {
+            startForeground(NOTIFY_ID, notification("准备下载", 0, 0))
+            running = true
+        } catch (e: Exception) {
+        }
+    }
+
     /** 串行处理队列：一个任务跑完才下一个，避免多个连接拖死低端机 */
     private fun pump() {
+        ensureForeground()
         while (true) {
             val tasks = DownloadStore.load(this)
             val task = tasks.firstOrNull { it.state == DownloadStore.State.QUEUED } ?: break
@@ -190,15 +262,18 @@ class DownloadService : Service() {
             finishCanceled(task)
             return
         }
-        // 若之前被暂停，等用户恢复或取消
-        while (pause.get() && !cancel.get()) {
-            Thread.sleep(200)
-        }
-        if (cancel.get()) {
-            finishCanceled(task)
+        // 排队期间被暂停：直接跳过，不要把工作线程堵在这里（否则后面的任务全卡住）
+        if (pause.get()) {
+            updateTask(task.id) {
+                state = DownloadStore.State.PAUSED
+                message = "已暂停"
+            }
             return
         }
 
+        ensureForeground()
+        currentName = task.name
+        lastReportAt = 0L
         updateTask(task.id) {
             state = DownloadStore.State.RUNNING
             message = ""
@@ -210,11 +285,7 @@ class DownloadService : Service() {
         } else {
             val target = File(task.targetPath)
             HttpDownloader.download(task.url, target, task.headers, pause, cancel) { bytes, total ->
-                updateTask(task.id) {
-                    this.bytes = bytes
-                    this.total = total
-                }
-                notifyProgress(task.name, bytes.toInt(), total.toInt())
+                reportProgress(task.id, bytes, total)
             }
         }
 
@@ -240,6 +311,8 @@ class DownloadService : Service() {
                 }
             }
         }
+        // 取消时把 m3u8 的分片目录也清掉，避免留下占空间的无用分片
+        if (result.canceled && task.m3u8) removeSegments(task.targetPath)
         notifyFinish(result)
     }
 
@@ -319,10 +392,7 @@ class DownloadService : Service() {
                     } else {
                         val segName = safeSegmentName(uri.substringAfterLast('/'))
                         val r = segment(resolveUrl(listUrl, uri), File(dir, segName), task, pause, cancel) { d, t ->
-                            updateTask(task.id) {
-                                bytes = doneBytes + d
-                                total = if (t > 0) doneBytes + t else -1L
-                            }
+                            reportProgress(task.id, doneBytes + d, if (t > 0) doneBytes + t else -1L)
                         }
                         if (r.ok) {
                             rewritten.add(trimmed.replace(
@@ -344,10 +414,7 @@ class DownloadService : Service() {
                     }
                     val segName = safeSegmentName(trimmed.substringAfterLast('/'))
                     val r = segment(resolveUrl(listUrl, trimmed), File(dir, segName), task, pause, cancel) { d, t ->
-                        updateTask(task.id) {
-                            bytes = doneBytes + d
-                            total = if (t > 0) doneBytes + t else -1L
-                        }
+                        reportProgress(task.id, doneBytes + d, if (t > 0) doneBytes + t else -1L)
                     }
                     when {
                         r.ok -> {
@@ -396,6 +463,7 @@ class DownloadService : Service() {
     private fun finishCanceled(task: DownloadStore.Task) {
         try {
             File(task.targetPath).delete()
+            if (task.m3u8) removeSegments(task.targetPath)
         } catch (e: Exception) {
         }
         updateTask(task.id) {
@@ -404,45 +472,47 @@ class DownloadService : Service() {
         }
     }
 
-    private fun setPaused(id: Long) {
-        val task = findTask(id) ?: return
-        if (task.state == DownloadStore.State.RUNNING) {
-            updateTask(id) {
-                state = DownloadStore.State.PAUSED
-                message = "已暂停"
-            }
+    /** 删除 m3u8 对应的分片目录 */
+    private fun removeSegments(listPath: String) {
+        try {
+            val listFile = File(listPath)
+            val dir = File(listFile.parentFile, listFile.name.substringBeforeLast('.') + "_contents")
+            dir.listFiles()?.forEach { it.delete() }
+            dir.delete()
+        } catch (e: Exception) {
         }
     }
 
     private fun updateTask(id: Long, block: DownloadStore.Task.() -> Unit) {
-        val tasks = DownloadStore.load(this)
-        val task = tasks.firstOrNull { it.id == id } ?: return
-        task.block()
-        DownloadStore.save(this, tasks)
+        synchronized(storeLock) {
+            val tasks = DownloadStore.load(this)
+            val task = tasks.firstOrNull { it.id == id } ?: return
+            task.block()
+            DownloadStore.save(this, tasks)
+        }
         broadcast()
     }
 
-    private fun findTask(id: Long): DownloadStore.Task? =
-        DownloadStore.load(this).firstOrNull { it.id == id }
-
-    private fun save() {
-        // updateTask 已保存，这里保留给显式场景
+    /** 进度节流：落盘 + 广播 + 通知都限速，避免每个数据块都刷主线程（按钮会因此点不动） */
+    private fun reportProgress(id: Long, bytes: Long, total: Long) {
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastReportAt < PROGRESS_INTERVAL_MS) return
+        lastReportAt = now
+        updateTask(id) {
+            this.bytes = bytes
+            if (total > 0) this.total = total
+        }
+        notifyProgress(currentName, clampInt(bytes), clampInt(total))
     }
+
+    private fun clampInt(value: Long): Int =
+        if (value <= 0) 0 else value.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+
+    private fun findTask(id: Long): DownloadStore.Task? =
+        synchronized(storeLock) { DownloadStore.load(this) }.firstOrNull { it.id == id }
 
     private fun broadcast() {
         sendBroadcast(Intent(ACTION_UPDATE).setPackage(packageName))
-    }
-
-    private fun downloadDir(): File {
-        // 放到公共 Download 目录，本地视频库可直接扫描到
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS)
-                ?: File(filesDir, "downloads")
-        } else {
-            @Suppress("DEPRECATION")
-            File(android.os.Environment.getExternalStoragePublicDirectory(
-                android.os.Environment.DIRECTORY_DOWNLOADS), "LiteBrowser")
-        }.apply { mkdirs() }
     }
 
     /** URL 路径或 mime 暗示是视频（直链常被 CDN 隐藏扩展名，用路径关键字兜底） */
