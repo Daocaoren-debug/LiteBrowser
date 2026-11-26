@@ -135,9 +135,22 @@ class DownloadService : Service() {
         val referenceName = intent.getStringExtra(EXTRA_NAME).orEmpty()
         val isM3u8 = url.contains(".m3u8", ignoreCase = true) ||
             intent.getBooleanExtra(EXTRA_M3U8, false)
-        val name = sanitize(
+        var name = sanitize(
             if (referenceName.isNotBlank()) referenceName else guessName(url, isM3u8)
         )
+        // 嗅探到的标题通常是纯文字（无后缀），补上扩展名，否则下载完系统/内置播放器都认不出
+        val hasVideoExt = listOf(".mp4", ".m4v", ".m3u8", ".m3u", ".webm", ".mkv", ".flv", ".mov")
+            .any { name.endsWith(it, ignoreCase = true) }
+        if (!hasVideoExt) {
+            val ext = if (isM3u8) {
+                ".m3u8"
+            } else if (looksLikeVideoUrl(url)) {
+                ".mp4"
+            } else {
+                ""
+            }
+            if (ext.isNotEmpty()) name += ext
+        }
         val task = DownloadStore.Task(
             id = DownloadStore.nextId(tasks),
             url = url,
@@ -430,6 +443,14 @@ class DownloadService : Service() {
             File(android.os.Environment.getExternalStoragePublicDirectory(
                 android.os.Environment.DIRECTORY_DOWNLOADS), "LiteBrowser")
         }.apply { mkdirs() }
+    }
+
+    /** URL 路径或 mime 暗示是视频（直链常被 CDN 隐藏扩展名，用路径关键字兜底） */
+    private fun looksLikeVideoUrl(url: String): Boolean {
+        val lower = url.lowercase()
+        return lower.contains("video", true) ||
+            listOf(".mp4", ".m4v", ".webm", ".mkv", ".flv", ".mov", ".3gp")
+                .any { lower.contains(it) }
     }
 
     private fun guessName(url: String, isM3u8: Boolean): String {

@@ -44,6 +44,21 @@ class M3u8PlayerActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        try {
+            initPlayer(savedInstanceState)
+        } catch (e: Throwable) {
+            try {
+                java.io.File(filesDir, "player_crash.txt").appendText(
+                    e.stackTraceToString(), Charsets.UTF_8
+                )
+            } catch (ignored: Exception) {
+            }
+            Toast.makeText(this, "播放启动失败，详情见 player_crash.txt", Toast.LENGTH_LONG).show()
+            finish()
+        }
+    }
+
+    private fun initPlayer(savedInstanceState: Bundle?) {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         setContentView(R.layout.activity_m3u8_player)
 

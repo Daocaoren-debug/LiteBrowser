@@ -172,7 +172,7 @@ class DownloadActivity : Activity() {
             return
         }
         // 视频文件用应用自己的播放器打开（m3u8/mp4 都支持，且自带防盗链/手势/旋屏）
-        if (isVideoFile(file.name)) {
+        if (task.m3u8 || isVideoFile(file.name)) {
             try {
                 startActivity(Intent(this, com.litebrowser.app.m3u8.M3u8PlayerActivity::class.java).apply {
                     putExtra(
