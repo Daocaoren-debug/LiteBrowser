@@ -58,13 +58,12 @@
             </intent-filter>
         </activity>
 
-        <!-- 内置播放器：网页嗅探视频用；configChanges 保证旋转不重建，sensor 跟随重力 -->
+        <!-- 内置播放器：网页嗅探视频用；configChanges 保证旋转不重建，方向由旋屏按钮手动控制 -->
         <activity
             android:name=".player.PlayerActivity"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|smallestScreenSize|uiMode"
             android:exported="false"
             android:launchMode="singleTop"
-            android:screenOrientation="sensor"
             android:theme="@android:style/Theme.Material.NoActionBar.Fullscreen" />
 
         <!-- 本地 M3U8 扫描列表：从浏览器"更多"菜单进入 -->
@@ -81,12 +80,13 @@
             android:exported="false"
             android:theme="@android:style/Theme.Material.NoActionBar.Fullscreen" />
 
-        <!-- 下载管理界面 -->
+        <!-- 下载管理界面：显式用系统 Material 主题，与 Activity 基类匹配 -->
         <activity
             android:name=".download.DownloadActivity"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode"
             android:exported="false"
-            android:label="@string/downloads" />
+            android:label="@string/downloads"
+            android:theme="@android:style/Theme.Material.Light.NoActionBar" />
 
         <!-- 自研下载服务：HttpURLConnection，支持 m3u8 分片、断点续传、防盗链 -->
         <service

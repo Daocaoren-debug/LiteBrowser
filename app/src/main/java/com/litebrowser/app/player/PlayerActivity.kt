@@ -2,6 +2,7 @@ package com.litebrowser.app.player
 
 import android.app.Activity
 import android.content.pm.ActivityInfo
+import android.content.res.Configuration
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -22,6 +23,7 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import com.litebrowser.app.R
+import com.litebrowser.app.download.DownloadHelper
 import java.util.Locale
 import kotlin.math.abs
 
@@ -72,6 +74,11 @@ class PlayerActivity : Activity() {
     private var player: ExoPlayer? = null
     private var mediaUrl: String = ""
     private var userSeeking = false
+    private var videoReferer: String? = null
+    private var videoUa: String? = null
+    private var videoTitle: String = ""
+    /** 当前是否横屏，自己维护，避免依赖 requestedOrientation 的 sensor/初值坑 */
+    private var landscape: Boolean = false
 
     // 手势状态
     private var downX = 0f
@@ -148,9 +155,13 @@ class PlayerActivity : Activity() {
         bindViews()
         bindActions()
 
+        landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+
+        videoReferer = intent.getStringExtra(EXTRA_REFERER)
+        videoUa = intent.getStringExtra(EXTRA_UA)
         val title = intent.getStringExtra(EXTRA_TITLE).orEmpty()
-        findViewById<TextView>(R.id.title_text).text =
-            if (title.isEmpty()) MediaSniffer.prettyName(mediaUrl) else title
+        videoTitle = if (title.isEmpty()) MediaSniffer.prettyName(mediaUrl) else title
+        findViewById<TextView>(R.id.title_text).text = videoTitle
 
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         applyImmersive()
@@ -180,6 +191,7 @@ class PlayerActivity : Activity() {
     private fun bindActions() {
         findViewById<ImageButton>(R.id.close_button).setOnClickListener { finish() }
         findViewById<ImageButton>(R.id.rotate_button).setOnClickListener { toggleOrientation() }
+        findViewById<ImageButton>(R.id.download_button).setOnClickListener { downloadCurrent() }
         findViewById<ImageButton>(R.id.rewind_button).setOnClickListener {
             seekBy(-SEEK_STEP_MS)
         }
@@ -255,13 +267,11 @@ class PlayerActivity : Activity() {
         releasePlayer()
 
         val headers = HashMap<String, String>()
-        val referer = intent.getStringExtra(EXTRA_REFERER)
-        if (!referer.isNullOrEmpty()) headers["Referer"] = referer
-        val ua = intent.getStringExtra(EXTRA_UA)
-        if (!ua.isNullOrEmpty()) headers["User-Agent"] = ua
+        if (!videoReferer.isNullOrEmpty()) headers["Referer"] = videoReferer
+        if (!videoUa.isNullOrEmpty()) headers["User-Agent"] = videoUa
 
         val dataSourceFactory = DefaultHttpDataSource.Factory()
-            .setUserAgent(if (ua.isNullOrEmpty()) UA_FALLBACK else ua)
+            .setUserAgent(if (videoUa.isNullOrEmpty()) UA_FALLBACK else videoUa)
             .setAllowCrossProtocolRedirects(true)   // 很多站点 http -> https 跳转
             .setDefaultRequestProperties(headers)
 
@@ -380,14 +390,38 @@ class PlayerActivity : Activity() {
         errorPanel.visibility = View.VISIBLE
     }
 
-    /** 旋转按钮：横屏 / 竖屏来回切（manifest 声明了 configChanges，不会重建界面） */
+    /**
+     * 旋转按钮：横屏 / 竖屏来回切。
+     * 用自己维护的 landscape 状态判断，不能读 requestedOrientation——
+     * manifest 里若声明 sensor，其初值是 SENSOR 而非 LANDSCAPE，会把"横屏点一下"判成"设横屏"，
+     * 于是从反向横屏翻到正向横屏，看起来像转了 180°。
+     */
     private fun toggleOrientation() {
-        requestedOrientation =
-            if (requestedOrientation == ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE) {
-                ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-            } else {
-                ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
-            }
+        landscape = !landscape
+        requestedOrientation = if (landscape) {
+            ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        } else {
+            ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+        }
+    }
+
+    /** 下载当前视频：带上页面的 Referer/UA/Cookie 与标题，交给自研下载服务 */
+    private fun downloadCurrent() {
+        if (mediaUrl.startsWith("blob:", true) || mediaUrl.startsWith("data:", true)) {
+            android.widget.Toast.makeText(
+                this, getString(R.string.download_unsupported), android.widget.Toast.LENGTH_LONG
+            ).show()
+            return
+        }
+        DownloadHelper.startDownload(
+            context = this,
+            url = mediaUrl,
+            referer = videoReferer,
+            userAgent = videoUa,
+            contentDisposition = null,
+            mimeType = null,
+            nameHint = videoTitle
+        )
     }
 
     @Suppress("DEPRECATION")

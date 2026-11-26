@@ -153,19 +153,37 @@
         </LinearLayout>
     </LinearLayout>
 
-    <!-- 旋屏按钮：右下角（在进度条上方），手动横竖屏切换 -->
-    <ImageButton
-        android:id="@+id/rotate_button"
-        android:layout_width="48dp"
-        android:layout_height="48dp"
+    <!-- 右下角悬浮按钮：下载 + 旋屏，透明底小图标 -->
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
         android:layout_gravity="bottom|end"
-        android:layout_marginEnd="16dp"
+        android:layout_marginEnd="14dp"
         android:layout_marginBottom="92dp"
-        android:background="@drawable/bg_sniff_fab"
-        android:contentDescription="@string/player_rotate"
-        android:elevation="4dp"
-        android:src="@android:drawable/ic_menu_rotate"
-        android:tint="#FFFFFF" />
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <ImageButton
+            android:id="@+id/download_button"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:background="@drawable/bg_player_icon"
+            android:contentDescription="@string/download"
+            android:padding="8dp"
+            android:src="@drawable/ic_download_white"
+            android:tint="#FFFFFF" />
+
+        <ImageButton
+            android:id="@+id/rotate_button"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:layout_marginStart="10dp"
+            android:background="@drawable/bg_player_icon"
+            android:contentDescription="@string/player_rotate"
+            android:padding="8dp"
+            android:src="@android:drawable/ic_menu_rotate"
+            android:tint="#FFFFFF" />
+    </LinearLayout>
 
     <!-- 长按快进/快退时的浮层提示 -->
     <TextView

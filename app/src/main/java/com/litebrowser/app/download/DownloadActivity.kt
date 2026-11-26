@@ -33,22 +33,37 @@ class DownloadActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_downloads)
+        try {
+            setContentView(R.layout.activity_downloads)
 
-        emptyText = findViewById(R.id.dlEmpty)
-        adapter = DownloadAdapter(
-            onAction = { task, action -> handleAction(task, action) },
-            onOpen = { openTask(it) }
-        )
-        val recycler = findViewById<RecyclerView>(R.id.dlRecycler)
-        recycler.layoutManager = LinearLayoutManager(this)
-        recycler.adapter = adapter
-        refresh()
+            emptyText = findViewById(R.id.dlEmpty)
+            adapter = DownloadAdapter(
+                onAction = { task, action -> handleAction(task, action) },
+                onOpen = { openTask(it) }
+            )
+            val recycler = findViewById<RecyclerView>(R.id.dlRecycler)
+            recycler.layoutManager = LinearLayoutManager(this)
+            recycler.adapter = adapter
+            refresh()
+        } catch (e: Throwable) {
+            // 任何初始化异常都写日志并给出提示，不再直接闪退
+            try {
+                File(filesDir, "download_crash.txt")
+                    .writeText(e.stackTraceToString(), Charsets.UTF_8)
+            } catch (ignored: Exception) {
+            }
+            Toast.makeText(this, "下载管理初始化失败，详情见 download_crash.txt", Toast.LENGTH_LONG).show()
+            finish()
+        }
     }
 
     override fun onStart() {
         super.onStart()
-        registerReceiver(receiver, IntentFilter(DownloadService.ACTION_UPDATE))
+        try {
+            registerReceiver(receiver, IntentFilter(DownloadService.ACTION_UPDATE))
+        } catch (e: Exception) {
+            // 已注册等异常忽略，不影响页面显示
+        }
         refresh()
     }
 
@@ -61,9 +76,17 @@ class DownloadActivity : Activity() {
     }
 
     private fun refresh() {
-        val tasks = DownloadStore.load(this)
-        adapter.submit(tasks)
-        emptyText.visibility = if (tasks.isEmpty()) View.VISIBLE else View.GONE
+        try {
+            val tasks = DownloadStore.load(this)
+            adapter.submit(tasks)
+            emptyText.visibility = if (tasks.isEmpty()) View.VISIBLE else View.GONE
+        } catch (e: Throwable) {
+            try {
+                File(filesDir, "download_crash.txt")
+                    .writeText(e.stackTraceToString(), Charsets.UTF_8)
+            } catch (ignored: Exception) {
+            }
+        }
     }
 
     private fun command(action: String, task: DownloadStore.Task) {
