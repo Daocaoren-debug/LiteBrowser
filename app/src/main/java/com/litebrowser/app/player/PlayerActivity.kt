@@ -1,13 +1,16 @@
 package com.litebrowser.app.player
 
 import android.app.Activity
+import android.content.Context
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
+import android.media.AudioManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.view.MotionEvent
 import android.view.View
+import android.widget.LinearLayout
 import android.view.WindowManager
 import android.widget.Button
 import android.widget.ImageButton
@@ -32,9 +35,9 @@ import kotlin.math.abs
  *
  * 交互：
  * - 点画面：显示 / 隐藏控制条（顶部标题栏、中间按钮、底部进度条一起）
- * - 长按屏幕左边缘：连续快退；长按右边缘：连续快进，松手停止
+ * - 左右滑动：快退 / 快进；右半屏上下滑调音量，左半屏上下滑调亮度
  * - 进度条：点哪跳哪，也可以直接拖动（给了 40dp 触摸区域）
- * - 中间按钮：±10 秒、播放暂停；右上角旋转按钮切横竖屏
+ * - 中间按钮：±10 秒、播放暂停；右下角下载 / 旋转按钮
  *
  * 实现要点：
  * - 手势跑在独立的 gesture_layer 上，它夹在 PlayerView 与控制条之间，
@@ -51,10 +54,7 @@ class PlayerActivity : Activity() {
         const val EXTRA_UA = "extra_ua"
         const val EXTRA_TITLE = "extra_title"
 
-        private const val SEEK_STEP_MS = 10_000L      // 按钮 / 长按每次跳转的步长
-        private const val HOLD_INTERVAL_MS = 320L     // 长按连续快进/快退的重复间隔
-        private const val LONG_PRESS_MS = 400L        // 判定长按的时间
-        private const val EDGE_RATIO = 0.35f          // 左右各 35% 为快进/快退热区
+        private const val SEEK_STEP_MS = 10_000L      // ±10 秒按钮的跳转步长
     }
 
     private lateinit var playerView: PlayerView
@@ -70,6 +70,7 @@ class PlayerActivity : Activity() {
     private lateinit var centerBar: View
     private lateinit var bottomBar: View
     private lateinit var gestureLayer: View
+    private lateinit var playerActions: LinearLayout
 
     private var player: ExoPlayer? = null
     private var mediaUrl: String = ""
@@ -82,9 +83,19 @@ class PlayerActivity : Activity() {
 
     // 手势状态
     private var downX = 0f
-    private var holdDirection = 0          // -1 快退，1 快进，0 空闲
+    private var downY = 0f
+    private var lastX = 0f
+    private var lastY = 0f
+    /** 手势类型：0 未定，1 水平快进/快退，2 垂直音量/亮度 */
+    private var gestureMode = 0
+    private var verticalSide = 0            // 1 右半屏(音量)，-1 左半屏(亮度)
     private var longPressConsumed = false
-    private val touchSlop by lazy { (resources.displayMetrics.density * 16f).toInt() }
+    private val touchSlop by lazy { (resources.displayMetrics.density * 12f).toInt() }
+
+    private val audioManager by lazy { getSystemService(Context.AUDIO_SERVICE) as AudioManager }
+    private var baseVolume = 0
+    private var maxVolume = 0
+    private var baseBrightness = 0.5f
 
     private val handler = Handler(Looper.getMainLooper())
 
@@ -92,30 +103,6 @@ class PlayerActivity : Activity() {
         override fun run() {
             updateProgress()
             handler.postDelayed(this, 500L)
-        }
-    }
-
-    /** 长按后持续跳转，直到松手 */
-    private val holdSeekTask = object : Runnable {
-        override fun run() {
-            if (holdDirection == 0) return
-            seekBy(holdDirection * SEEK_STEP_MS)
-            updateSeekHint()
-            handler.postDelayed(this, HOLD_INTERVAL_MS)
-        }
-    }
-
-    /** 按下 400ms 后触发：落在左/右热区才开始连续快退/快进 */
-    private val longPressTask = object : Runnable {
-        override fun run() {
-            val width = gestureLayer.width
-            if (width <= 0 || player == null) return
-            longPressConsumed = true
-            when {
-                downX < width * EDGE_RATIO -> startHoldSeek(-1)
-                downX > width * (1f - EDGE_RATIO) -> startHoldSeek(1)
-                else -> Unit   // 中间长按不做事，只是不再触发"点击收起控制条"
-            }
         }
     }
 
@@ -156,6 +143,7 @@ class PlayerActivity : Activity() {
         bindActions()
 
         landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+        applyActionLayout()
 
         videoReferer = intent.getStringExtra(EXTRA_REFERER)
         videoUa = intent.getStringExtra(EXTRA_UA)
@@ -183,6 +171,7 @@ class PlayerActivity : Activity() {
         centerBar = findViewById(R.id.center_bar)
         bottomBar = findViewById(R.id.bottom_bar)
         gestureLayer = findViewById(R.id.gesture_layer)
+        playerActions = findViewById(R.id.player_actions)
 
         playerView.useController = false
         playerView.resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
@@ -209,32 +198,86 @@ class PlayerActivity : Activity() {
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     downX = event.x
+                    downY = event.y
+                    lastX = event.x
+                    lastY = event.y
+                    gestureMode = 0
                     longPressConsumed = false
-                    view.postDelayed(longPressTask, LONG_PRESS_MS)
+                    // 记录当前音量/亮度作为滑动起点
+                    maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+                    baseVolume = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+                    baseBrightness = window.attributes.screenBrightness.let {
+                        if (it < 0f) 0.5f else it
+                    }
                     true
                 }
 
                 MotionEvent.ACTION_MOVE -> {
-                    // 明显横向移动（用户其实想拖进度条）就取消长按判定
-                    if (!longPressConsumed && abs(event.x - downX) > touchSlop) {
-                        view.removeCallbacks(longPressTask)
+                    val dx = event.x - lastX
+                    val dy = event.y - lastY
+                    val totalX = event.x - downX
+                    val totalY = event.y - downY
+
+                    if (gestureMode == 0 &&
+                        (abs(totalX) > touchSlop || abs(totalY) > touchSlop)
+                    ) {
+                        // 首段位移判定方向：横向多→快进快退；纵向多→音量/亮度
+                        gestureMode = if (abs(totalX) >= abs(totalY)) 1 else 2
+                        verticalSide = if (downX >= view.width / 2f) 1 else -1
+                        longPressConsumed = true
                     }
+
+                    when (gestureMode) {
+                        1 -> {
+                            // 右划快进、左划快退：按位移比例换算毫秒
+                            val deltaMs = (dx / view.width * 120_000f).toLong()
+                            if (deltaMs != 0L) seekBy(deltaMs)
+                            showGestureHint(
+                                getString(
+                                    if (dx > 0) R.string.player_fast_forward else R.string.player_fast_rewind
+                                ) + "  " + formatTime(player?.currentPosition ?: 0L)
+                            )
+                        }
+                        2 -> {
+                            val step = -dy / view.height   // 上滑为正
+                            if (verticalSide > 0) {
+                                // 右半屏：音量
+                                val target = (baseVolume + step * maxVolume).toInt()
+                                    .coerceIn(0, maxVolume)
+                                audioManager.setStreamVolume(
+                                    AudioManager.STREAM_MUSIC, target, 0
+                                )
+                                showGestureHint(
+                                    getString(R.string.player_volume) + " $target/$maxVolume"
+                                )
+                            } else {
+                                // 左半屏：亮度
+                                val target = (baseBrightness + step).coerceIn(0.05f, 1f)
+                                val lp = window.attributes
+                                lp.screenBrightness = target
+                                window.attributes = lp
+                                showGestureHint(
+                                    getString(R.string.player_brightness) +
+                                        " ${(target * 100).toInt()}%"
+                                )
+                            }
+                        }
+                    }
+                    lastX = event.x
+                    lastY = event.y
                     true
                 }
 
                 MotionEvent.ACTION_UP -> {
-                    view.removeCallbacks(longPressTask)
-                    if (holdDirection != 0) {
-                        stopHoldSeek()
-                    } else if (!longPressConsumed) {
-                        toggleControls()
-                    }
+                    if (gestureMode == 0 && !longPressConsumed) toggleControls()
+                    gestureMode = 0
+                    seekHint.visibility = View.GONE
                     true
                 }
 
                 MotionEvent.ACTION_CANCEL -> {
-                    view.removeCallbacks(longPressTask)
-                    stopHoldSeek()
+                    gestureMode = 0
+                    seekHint.visibility = View.GONE
                     true
                 }
 
@@ -330,27 +373,9 @@ class PlayerActivity : Activity() {
         bottomBar.visibility = target
     }
 
-    private fun startHoldSeek(direction: Int) {
-        holdDirection = direction
-        handler.removeCallbacks(holdSeekTask)
-        handler.post(holdSeekTask)
-    }
-
-    private fun stopHoldSeek() {
-        holdDirection = 0
-        handler.removeCallbacks(holdSeekTask)
-        seekHint.visibility = View.GONE
-    }
-
-    private fun updateSeekHint() {
-        val exo = player ?: return
-        val action = if (holdDirection > 0) {
-            getString(R.string.player_fast_forward)
-        } else {
-            getString(R.string.player_fast_rewind)
-        }
-        seekHint.text = "$action  " + formatTime(exo.currentPosition) +
-            " / " + formatTime(exo.duration)
+    /** 显示滑动手势提示（快进/音量/亮度） */
+    private fun showGestureHint(text: String) {
+        seekHint.text = text
         seekHint.visibility = View.VISIBLE
     }
 
@@ -405,6 +430,29 @@ class PlayerActivity : Activity() {
         } else {
             ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
         }
+        applyActionLayout()
+    }
+
+    /** 竖屏时下载/旋屏按钮横向排列，横屏时纵向排列 */
+    private fun applyActionLayout() {
+        if (!::playerActions.isInitialized) return
+        playerActions.orientation = if (landscape) {
+            LinearLayout.VERTICAL
+        } else {
+            LinearLayout.HORIZONTAL
+        }
+        val rotate = findViewById<ImageButton>(R.id.rotate_button)
+        val lp = rotate.layoutParams as LinearLayout.LayoutParams
+        lp.leftMargin = if (landscape) 0 else (10 * resources.displayMetrics.density).toInt()
+        lp.topMargin = if (landscape) (10 * resources.displayMetrics.density).toInt() else 0
+        rotate.layoutParams = lp
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        landscape = newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE
+        applyActionLayout()
+        applyImmersive()
     }
 
     /** 下载当前视频：带上页面的 Referer/UA/Cookie 与标题，交给自研下载服务 */
@@ -457,20 +505,19 @@ class PlayerActivity : Activity() {
 
     override fun onPause() {
         super.onPause()
-        stopHoldSeek()
+        seekHint.visibility = View.GONE
         player?.pause()
     }
 
     override fun onStop() {
         super.onStop()
         handler.removeCallbacks(ticker)
-        stopHoldSeek()
+        seekHint.visibility = View.GONE
     }
 
     override fun onDestroy() {
         handler.removeCallbacks(ticker)
-        handler.removeCallbacks(longPressTask)
-        stopHoldSeek()
+        seekHint.visibility = View.GONE
         releasePlayer()
         super.onDestroy()
     }

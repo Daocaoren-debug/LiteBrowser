@@ -49,6 +49,15 @@
                 android:src="@drawable/ic_star_border" />
 
             <ImageButton
+                android:id="@+id/sniff_button"
+                android:layout_width="36dp"
+                android:layout_height="36dp"
+                android:background="?android:attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/sniff"
+                android:padding="7dp"
+                android:src="@drawable/ic_sniff" />
+
+            <ImageButton
                 android:id="@+id/menu_button"
                 android:layout_width="40dp"
                 android:layout_height="40dp"
@@ -77,20 +86,6 @@
                 android:id="@+id/web_view"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent" />
-
-            <!-- 资源嗅探悬浮按钮：右下角，点按分析本页视频 -->
-            <ImageButton
-                android:id="@+id/sniff_button"
-                android:layout_width="52dp"
-                android:layout_height="52dp"
-                android:layout_gravity="bottom|end"
-                android:layout_marginEnd="16dp"
-                android:layout_marginBottom="16dp"
-                android:background="@drawable/bg_sniff_fab"
-                android:contentDescription="@string/sniff"
-                android:elevation="4dp"
-                android:src="@android:drawable/ic_menu_slideshow"
-                android:tint="#FFFFFF" />
         </FrameLayout>
 
         <!-- 底部导航栏 -->

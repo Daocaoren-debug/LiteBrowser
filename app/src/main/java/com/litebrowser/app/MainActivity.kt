@@ -131,7 +131,9 @@ class MainActivity : Activity() {
             // 从后台回收 / 系统重启后恢复原页面，避免用户丢失正在看的网页
             urlEdit.setText(webView.url ?: getString(R.string.home_url))
         } else {
-            loadUrl(intent?.data?.toString().orEmpty().ifEmpty { getString(R.string.home_url) })
+            // 启动显示空白首页，地址栏留空；只有外部链接进来才打开具体网址
+            val external = intent?.data?.toString().orEmpty()
+            if (external.isNotEmpty()) loadUrl(external) else loadHome()
         }
     }
 
@@ -235,7 +237,7 @@ class MainActivity : Activity() {
             if (webView.canGoForward()) webView.goForward() else toast(getString(R.string.no_next_page))
         }
         findViewById<ImageButton>(R.id.home_button).setOnClickListener {
-            loadUrl(getString(R.string.home_url))
+            loadHome()
         }
         findViewById<ImageButton>(R.id.refresh_button).setOnClickListener {
             webView.reload()
@@ -266,6 +268,12 @@ class MainActivity : Activity() {
     private fun loadUrl(url: String) {
         urlEdit.setText(url)
         webView.loadUrl(url)
+    }
+
+    /** 空白首页：不加载任何网址，地址栏清空 */
+    private fun loadHome() {
+        urlEdit.setText("")
+        webView.loadUrl("about:blank")
     }
 
     private fun isWebUrl(url: String): Boolean =
