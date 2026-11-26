@@ -7,12 +7,10 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.net.Uri
-import android.os.Build
 import android.os.Bundle
 import android.view.View
 import android.widget.TextView
 import android.widget.Toast
-import androidx.core.content.FileProvider
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.litebrowser.app.R
@@ -173,27 +171,24 @@ class DownloadActivity : Activity() {
             Toast.makeText(this, getString(R.string.download_file_missing), Toast.LENGTH_SHORT).show()
             return
         }
-        // m3u8 交给本地视频库的播放器；其它类型用系统能处理的方式打开
-        if (task.m3u8 || file.name.endsWith(".mp4", true) || file.name.endsWith(".m3u8", true)) {
-            val uri: Uri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                try {
-                    FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
-                } catch (e: Exception) {
-                    Uri.fromFile(file)
-                }
-            } else {
-                Uri.fromFile(file)
-            }
-            val intent = Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(uri, if (file.name.endsWith(".m3u8", true)) "application/vnd.apple.mpegurl" else "video/mp4")
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }
+        // 视频文件用应用自己的播放器打开（m3u8/mp4 都支持，且自带防盗链/手势/旋屏）
+        if (isVideoFile(file.name)) {
             try {
-                startActivity(intent)
+                startActivity(Intent(this, com.litebrowser.app.m3u8.M3u8PlayerActivity::class.java).apply {
+                    putExtra(
+                        com.litebrowser.app.m3u8.M3u8PlayerActivity.EXTRA_URI,
+                        Uri.fromFile(file).toString()
+                    )
+                    putExtra(
+                        com.litebrowser.app.m3u8.M3u8PlayerActivity.EXTRA_NAME,
+                        file.name
+                    )
+                })
             } catch (e: Exception) {
                 Toast.makeText(this, getString(R.string.download_no_player), Toast.LENGTH_SHORT).show()
             }
         } else {
+            // 非视频类型交给系统应用
             val intent = Intent(Intent.ACTION_VIEW).apply {
                 setDataAndType(Uri.fromFile(file), "*/*")
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
@@ -204,5 +199,13 @@ class DownloadActivity : Activity() {
                 Toast.makeText(this, getString(R.string.download_no_player), Toast.LENGTH_SHORT).show()
             }
         }
+    }
+
+    private fun isVideoFile(name: String): Boolean {
+        val lower = name.lowercase()
+        return lower.endsWith(".m3u8") || lower.endsWith(".m3u") ||
+            lower.endsWith(".mp4") || lower.endsWith(".m4v") ||
+            lower.endsWith(".webm") || lower.endsWith(".mkv")
+    }
     }
 }
