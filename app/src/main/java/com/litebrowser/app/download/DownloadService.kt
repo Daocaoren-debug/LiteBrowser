@@ -373,8 +373,13 @@ class DownloadService : Service() {
                             resolveUrl(listUrl, uri), keyFile, task.headers, pause, cancel
                         ) { _, _ -> }
                         if (r.ok) {
+                            // 分片/密钥都放在 xxx_contents/ 子目录，列表里必须带上目录前缀，
+                            // 否则播放器会去 m3u8 同目录找，报 IO_FILE_NOT_FOUND
                             rewritten.add(
-                                trimmed.replace(Regex("URI=\"[^\"]+\"", RegexOption.IGNORE_CASE), "URI=\"$keyName\"")
+                                trimmed.replace(
+                                    Regex("URI=\"[^\"]+\"", RegexOption.IGNORE_CASE),
+                                    "URI=\"$dirName/$keyName\""
+                                )
                             )
                             totalBytes += r.bytes
                             doneBytes += r.bytes
@@ -396,7 +401,8 @@ class DownloadService : Service() {
                         }
                         if (r.ok) {
                             rewritten.add(trimmed.replace(
-                                Regex("URI=\"[^\"]+\"", RegexOption.IGNORE_CASE), "URI=\"$segName\""
+                                Regex("URI=\"[^\"]+\"", RegexOption.IGNORE_CASE),
+                                "URI=\"$dirName/$segName\""
                             ))
                             doneBytes += r.bytes
                             totalBytes += r.bytes
@@ -418,7 +424,7 @@ class DownloadService : Service() {
                     }
                     when {
                         r.ok -> {
-                            rewritten.add(segName)
+                            rewritten.add("$dirName/$segName")
                             doneBytes += r.bytes
                             totalBytes += r.bytes
                         }

@@ -89,6 +89,16 @@ class M3u8PlayerActivity : Activity() {
         }
 
         val uri = Uri.parse(uriString)
+        // 旧版本下载的 m3u8 把分片放在 xxx_contents/，但列表里只写了文件名，
+        // 播放时会报 IO_FILE_NOT_FOUND。这里就地修正一次，用户无需重新下载。
+        if ("file".equals(uri.scheme, ignoreCase = true)) {
+            val path = uri.path
+            if (!path.isNullOrBlank() &&
+                (path.endsWith(".m3u8", true) || path.endsWith(".m3u", true))
+            ) {
+                repairLocalPlaylist(java.io.File(path))
+            }
+        }
         val dataSourceFactory = DefaultDataSource.Factory(this)
         val mediaItem = MediaItem.fromUri(uri)
         // m3u8 走 HLS 源，转换出来的 mp4 走普通 progressive 源
@@ -118,6 +128,66 @@ class M3u8PlayerActivity : Activity() {
             }
 
         playerView?.player = player
+    }
+
+    /**
+     * 老版本下载的 m3u8：分片和密钥下载到了 xxx_contents/ 子目录，
+     * 但写回列表时只留了文件名（如 "0"），播放器按相对路径去 m3u8 同目录找就报
+     * IO_FILE_NOT_FOUND。这里把这类引用补上 dirName/ 前缀，就地修一次。
+     * 已经有前缀的、完整 http(s) 的、以及 URI 中带路径的都不会动。
+     */
+    private fun repairLocalPlaylist(file: java.io.File) {
+        try {
+            if (!file.exists()) return
+            val dirName = file.name.substringBeforeLast('.', file.name) + "_contents"
+            val contents = java.io.File(file.parentFile, dirName)
+            if (!contents.isDirectory) return
+
+            val uriRegex = Regex("URI=\"([^\"]+)\"", RegexOption.IGNORE_CASE)
+            var changed = false
+            val fixed = ArrayList<String>()
+            file.readLines(Charsets.UTF_8).forEach { line ->
+                val trimmed = line.trim()
+                val newLine = when {
+                    trimmed.startsWith("#EXT-X-KEY", true) ||
+                        trimmed.startsWith("#EXT-X-MAP", true) -> {
+                        val ref = uriRegex.find(line)?.groupValues?.getOrNull(1)
+                        if (ref != null && needsPrefix(ref, file, contents)) {
+                            changed = true
+                            line.replace(
+                                uriRegex,
+                                "URI=\"$dirName/${ref.substringAfterLast('/')}\""
+                            )
+                        } else line
+                    }
+
+                    trimmed.isNotEmpty() && !trimmed.startsWith("#") -> {
+                        if (needsPrefix(trimmed, file, contents)) {
+                            changed = true
+                            "$dirName/${trimmed.substringAfterLast('/')}"
+                        } else line
+                    }
+
+                    else -> line
+                }
+                fixed.add(newLine)
+            }
+            if (changed) file.writeText(fixed.joinToString("\n"), Charsets.UTF_8)
+        } catch (e: Exception) {
+            // 修复失败就保持原样，交给播放器给出明确错误
+        }
+    }
+
+    /** 引用是裸文件名、同目录找不到、且 xxx_contents/ 下确实存在 → 需要补前缀 */
+    private fun needsPrefix(
+        ref: String,
+        playlist: java.io.File,
+        contents: java.io.File
+    ): Boolean {
+        if (ref.isEmpty() || ref.contains('/') || ref.contains("://")) return false
+        if (ref.startsWith("data:", true) || ref.startsWith("blob:", true)) return false
+        if (java.io.File(playlist.parentFile, ref).exists()) return false
+        return java.io.File(contents, ref).exists()
     }
 
     /** 两态手动旋转：锁定横屏 / 锁定竖屏，不再有 FULL_SENSOR 自动跟随 */
