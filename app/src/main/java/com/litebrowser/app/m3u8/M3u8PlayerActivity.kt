@@ -22,6 +22,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.hls.HlsMediaSource
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import androidx.media3.ui.PlayerView
+import androidx.media3.ui.PlayerView.ControllerVisibilityListener
 
 /**
  * 本地 m3u8 播放器：ExoPlayer 自带控制器（拖动进度、±10 秒、暂停）+ 手动旋屏。
@@ -39,6 +40,8 @@ class M3u8PlayerActivity : Activity() {
     private var gestureHelper: PlayerGestureHelper? = null
     /** 控制器（底部进度条区域）占用的高度，触摸落在这一带要穿透给 PlayerView */
     private var controllerZone = 0
+    /** 控制器是否可见，用监听器维护（Media3 1.3.1 没有 isControllerVisible 属性） */
+    private var controllerVisible = false
 
     /** true = 当前横屏，false = 当前竖屏；进入时按系统当前方向初始化 */
     private var landscape = false
@@ -94,6 +97,9 @@ class M3u8PlayerActivity : Activity() {
             controllerShowTimeoutMs = 4000
         }
         controllerZone = (96 * resources.displayMetrics.density).toInt()
+        playerView?.setControllerVisibilityListener(
+            ControllerVisibilityListener { visibility -> controllerVisible = visibility == View.VISIBLE }
+        )
         bindGestures()
 
         val uri = Uri.parse(uriString)
@@ -158,13 +164,13 @@ class M3u8PlayerActivity : Activity() {
                 }
             },
             onTap = {
-                if (pv.isControllerVisible) pv.hideController() else pv.showController()
+                if (controllerVisible) pv.hideController() else pv.showController()
             }
         )
         layer.setOnTouchListener { view, event ->
             // 控制器可见时，底部进度条区域让给 PlayerView 自己处理
             if (event.actionMasked == MotionEvent.ACTION_DOWN &&
-                pv.isControllerVisible && event.y > view.height - controllerZone
+                controllerVisible && event.y > view.height - controllerZone
             ) {
                 return@setOnTouchListener false
             }
