@@ -8,6 +8,8 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.net.Uri
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.View
 import android.widget.TextView
 import android.widget.Toast
@@ -23,6 +25,21 @@ class DownloadActivity : Activity() {
 
     private lateinit var adapter: DownloadAdapter
     private lateinit var emptyText: TextView
+
+    private val handler = Handler(Looper.getMainLooper())
+    /** 上次刷新的数据指纹，只有变化时才 submit，避免频繁 notifyDataSetChanged 影响点击 */
+    private var lastSignature = ""
+
+    /**
+     * 前台定时轮询：部分机型前台广播会被延迟甚至丢失，光靠广播会出现
+     * "盯着进度条不动、退出再进才更新"。这里每 400ms 主动读一次任务状态兜底。
+     */
+    private val pollTask = object : Runnable {
+        override fun run() {
+            refresh()
+            handler.postDelayed(this, 400L)
+        }
+    }
 
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -64,9 +81,12 @@ class DownloadActivity : Activity() {
             // 已注册等异常忽略，不影响页面显示
         }
         refresh()
+        handler.removeCallbacks(pollTask)
+        handler.post(pollTask)
     }
 
     override fun onStop() {
+        handler.removeCallbacks(pollTask)
         try {
             unregisterReceiver(receiver)
         } catch (e: Exception) {
@@ -77,6 +97,12 @@ class DownloadActivity : Activity() {
     private fun refresh() {
         try {
             val tasks = DownloadStore.load(this)
+            // 状态/字节数/总大小任一变化才重绘，静止时不动列表
+            val signature = tasks.joinToString("|") {
+                "${it.id}:${it.state.name}:${it.bytes}:${it.total}:${it.message}"
+            }
+            if (signature == lastSignature) return
+            lastSignature = signature
             adapter.submit(tasks)
             emptyText.visibility = if (tasks.isEmpty()) View.VISIBLE else View.GONE
         } catch (e: Throwable) {

@@ -6,10 +6,13 @@ import android.app.Activity
 import android.content.pm.ActivityInfo
 import android.net.Uri
 import android.os.Bundle
+import android.view.MotionEvent
+import android.view.View
 import android.view.WindowManager
 import android.widget.ImageButton
 import android.widget.TextView
 import android.widget.Toast
+import com.litebrowser.app.player.PlayerGestureHelper
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
@@ -33,6 +36,9 @@ class M3u8PlayerActivity : Activity() {
     private var player: ExoPlayer? = null
     private var playerView: PlayerView? = null
     private var rotateButton: ImageButton? = null
+    private var gestureHelper: PlayerGestureHelper? = null
+    /** 控制器（底部进度条区域）占用的高度，触摸落在这一带要穿透给 PlayerView */
+    private var controllerZone = 0
 
     /** true = 当前横屏，false = 当前竖屏；进入时按系统当前方向初始化 */
     private var landscape = false
@@ -87,6 +93,8 @@ class M3u8PlayerActivity : Activity() {
             setShowNextButton(false)
             controllerShowTimeoutMs = 4000
         }
+        controllerZone = (96 * resources.displayMetrics.density).toInt()
+        bindGestures()
 
         val uri = Uri.parse(uriString)
         // 旧版本下载的 m3u8 把分片放在 xxx_contents/，但列表里只写了文件名，
@@ -128,6 +136,40 @@ class M3u8PlayerActivity : Activity() {
             }
 
         playerView?.player = player
+    }
+
+    /**
+     * 手势层：与嗅探播放器共用同一套（横滑快进快退 / 纵滑音量亮度 / 长按快进 / 单击切控制条）。
+     * 区别是这里保留 PlayerView 自带控制器，所以控制器显示时底部区域的触摸要穿透给它，
+     * 否则进度条和 ±10 秒按钮会被手势层挡住。
+     */
+    private fun bindGestures() {
+        val hint = findViewById<TextView>(R.id.seekHint)
+        val layer = findViewById<View>(R.id.gestureLayer)
+        val pv = playerView ?: return
+        gestureHelper = PlayerGestureHelper(
+            activity = this,
+            hintView = hint,
+            currentPosition = { player?.currentPosition ?: 0L },
+            seekBy = { delta ->
+                player?.let { p ->
+                    val target = (p.currentPosition + delta).coerceAtLeast(0L)
+                    p.seekTo(if (p.duration > 0) target.coerceAtMost(p.duration) else target)
+                }
+            },
+            onTap = {
+                if (pv.isControllerVisible) pv.hideController() else pv.showController()
+            }
+        )
+        layer.setOnTouchListener { view, event ->
+            // 控制器可见时，底部进度条区域让给 PlayerView 自己处理
+            if (event.actionMasked == MotionEvent.ACTION_DOWN &&
+                pv.isControllerVisible && event.y > view.height - controllerZone
+            ) {
+                return@setOnTouchListener false
+            }
+            gestureHelper?.onTouch(view, event) ?: false
+        }
     }
 
     /**
@@ -205,10 +247,12 @@ class M3u8PlayerActivity : Activity() {
 
     override fun onStop() {
         super.onStop()
+        gestureHelper?.cancel()
         player?.pause()
     }
 
     override fun onDestroy() {
+        gestureHelper?.cancel()
         playerView?.player = null
         player?.release()
         player = null

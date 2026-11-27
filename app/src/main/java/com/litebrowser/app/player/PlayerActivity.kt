@@ -1,14 +1,11 @@
 package com.litebrowser.app.player
 
 import android.app.Activity
-import android.content.Context
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
-import android.media.AudioManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.view.MotionEvent
 import android.view.View
 import android.widget.LinearLayout
 import android.view.WindowManager
@@ -28,14 +25,14 @@ import androidx.media3.ui.PlayerView
 import com.litebrowser.app.R
 import com.litebrowser.app.download.DownloadHelper
 import java.util.Locale
-import kotlin.math.abs
 
 /**
  * 内置播放器：ExoPlayer(Media3) + 自绘控制条。
  *
  * 交互：
  * - 点画面：显示 / 隐藏控制条（顶部标题栏、中间按钮、底部进度条一起）
- * - 左右滑动：快退 / 快进；右半屏上下滑调音量，左半屏上下滑调亮度
+ * - 左右滑动：快退 / 快进；右半屏上下滑调音量，左半屏上下滑调亮度（均 0-100）
+ * - 长按画面：持续快进，松手停止
  * - 进度条：点哪跳哪，也可以直接拖动（给了 40dp 触摸区域）
  * - 中间按钮：±10 秒、播放暂停；右下角下载 / 旋转按钮
  *
@@ -81,21 +78,8 @@ class PlayerActivity : Activity() {
     /** 当前是否横屏，自己维护，避免依赖 requestedOrientation 的 sensor/初值坑 */
     private var landscape: Boolean = false
 
-    // 手势状态
-    private var downX = 0f
-    private var downY = 0f
-    private var lastX = 0f
-    private var lastY = 0f
-    /** 手势类型：0 未定，1 水平快进/快退，2 垂直音量/亮度 */
-    private var gestureMode = 0
-    private var verticalSide = 0            // 1 右半屏(音量)，-1 左半屏(亮度)
-    private var longPressConsumed = false
-    private val touchSlop by lazy { (resources.displayMetrics.density * 12f).toInt() }
-
-    private val audioManager by lazy { getSystemService(Context.AUDIO_SERVICE) as AudioManager }
-    private var baseVolume = 0
-    private var maxVolume = 0
-    private var baseBrightness = 0.5f
+    /** 共用手势控制器（横滑快进快退、纵滑音量亮度、长按快进） */
+    private lateinit var gestureHelper: PlayerGestureHelper
 
     private val handler = Handler(Looper.getMainLooper())
 
@@ -193,97 +177,15 @@ class PlayerActivity : Activity() {
         }
         playPauseButton.setOnClickListener { togglePlayPause() }
 
-        // 手势层：点一下切控制条，长按左右边缘连续快退/快进
-        gestureLayer.setOnTouchListener { view, event ->
-            when (event.actionMasked) {
-                MotionEvent.ACTION_DOWN -> {
-                    downX = event.x
-                    downY = event.y
-                    lastX = event.x
-                    lastY = event.y
-                    gestureMode = 0
-                    longPressConsumed = false
-                    // 记录当前音量/亮度作为滑动起点
-                    maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-                    baseVolume = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
-                    baseBrightness = window.attributes.screenBrightness.let {
-                        if (it < 0f) 0.5f else it
-                    }
-                    true
-                }
-
-                MotionEvent.ACTION_MOVE -> {
-                    val dx = event.x - lastX
-                    val dy = event.y - lastY
-                    val totalX = event.x - downX
-                    val totalY = event.y - downY
-
-                    if (gestureMode == 0 &&
-                        (abs(totalX) > touchSlop || abs(totalY) > touchSlop)
-                    ) {
-                        // 首段位移判定方向：横向多→快进快退；纵向多→音量/亮度
-                        gestureMode = if (abs(totalX) >= abs(totalY)) 1 else 2
-                        verticalSide = if (downX >= view.width / 2f) 1 else -1
-                        longPressConsumed = true
-                    }
-
-                    when (gestureMode) {
-                        1 -> {
-                            // 右划快进、左划快退：按位移比例换算毫秒
-                            val deltaMs = (dx / view.width * 120_000f).toLong()
-                            if (deltaMs != 0L) seekBy(deltaMs)
-                            showGestureHint(
-                                getString(
-                                    if (dx > 0) R.string.player_fast_forward else R.string.player_fast_rewind
-                                ) + "  " + formatTime(player?.currentPosition ?: 0L)
-                            )
-                        }
-                        2 -> {
-                            val step = -dy / view.height   // 上滑为正
-                            if (verticalSide > 0) {
-                                // 右半屏：音量
-                                val target = (baseVolume + step * maxVolume).toInt()
-                                    .coerceIn(0, maxVolume)
-                                audioManager.setStreamVolume(
-                                    AudioManager.STREAM_MUSIC, target, 0
-                                )
-                                showGestureHint(
-                                    getString(R.string.player_volume) + " $target/$maxVolume"
-                                )
-                            } else {
-                                // 左半屏：亮度
-                                val target = (baseBrightness + step).coerceIn(0.05f, 1f)
-                                val lp = window.attributes
-                                lp.screenBrightness = target
-                                window.attributes = lp
-                                showGestureHint(
-                                    getString(R.string.player_brightness) +
-                                        " ${(target * 100).toInt()}%"
-                                )
-                            }
-                        }
-                    }
-                    lastX = event.x
-                    lastY = event.y
-                    true
-                }
-
-                MotionEvent.ACTION_UP -> {
-                    if (gestureMode == 0 && !longPressConsumed) toggleControls()
-                    gestureMode = 0
-                    seekHint.visibility = View.GONE
-                    true
-                }
-
-                MotionEvent.ACTION_CANCEL -> {
-                    gestureMode = 0
-                    seekHint.visibility = View.GONE
-                    true
-                }
-
-                else -> false
-            }
-        }
+        // 共用手势：横滑快进快退、右半屏音量、左半屏亮度（0-100）、长按快进、单击切控制条
+        gestureHelper = PlayerGestureHelper(
+            activity = this,
+            hintView = seekHint,
+            currentPosition = { player?.currentPosition ?: 0L },
+            seekBy = { delta -> seekBy(delta) },
+            onTap = { toggleControls() }
+        )
+        gestureHelper.attach(gestureLayer)
 
         seekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
@@ -371,12 +273,6 @@ class PlayerActivity : Activity() {
         topBar.visibility = target
         centerBar.visibility = target
         bottomBar.visibility = target
-    }
-
-    /** 显示滑动手势提示（快进/音量/亮度） */
-    private fun showGestureHint(text: String) {
-        seekHint.text = text
-        seekHint.visibility = View.VISIBLE
     }
 
     // ---------------- 进度显示 ----------------
@@ -515,19 +411,19 @@ class PlayerActivity : Activity() {
 
     override fun onPause() {
         super.onPause()
-        seekHint.visibility = View.GONE
+        gestureHelper.cancel()
         player?.pause()
     }
 
     override fun onStop() {
         super.onStop()
         handler.removeCallbacks(ticker)
-        seekHint.visibility = View.GONE
+        gestureHelper.cancel()
     }
 
     override fun onDestroy() {
         handler.removeCallbacks(ticker)
-        seekHint.visibility = View.GONE
+        gestureHelper.cancel()
         releasePlayer()
         super.onDestroy()
     }
