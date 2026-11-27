@@ -12,8 +12,8 @@ android {
         // 最低支持 Android 8.0 (API 26)，覆盖绝大多数仍在服役的低端机
         minSdk = 26
         targetSdk = 34
-        versionCode = 24
-        versionName = "1.5.9"
+        versionCode = 25
+        versionName = "1.6.0"
 
         testInstrumentationRunner = "android.test.InstrumentationTestRunner"
     }

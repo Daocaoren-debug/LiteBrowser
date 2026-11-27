@@ -31,8 +31,9 @@ import java.util.Locale
  *
  * 交互：
  * - 点画面：显示 / 隐藏控制条（顶部标题栏、中间按钮、底部进度条一起）
- * - 左右滑动：快退 / 快进；右半屏上下滑调音量，左半屏上下滑调亮度（均 0-100）
- * - 长按画面：持续快进，松手停止
+ * - 左右滑动：以按下点为基准快退 / 快进，并显示目标时间
+ * - 右半屏上下滑调音量，左半屏上下滑调亮度（均 0-100，从当前值起算、避开屏幕边缘）
+ * - 长按画面：2 倍速播放，松手恢复
  * - 进度条：点哪跳哪，也可以直接拖动（给了 40dp 触摸区域）
  * - 中间按钮：±10 秒、播放暂停；右下角下载 / 旋转按钮
  *
@@ -182,7 +183,12 @@ class PlayerActivity : Activity() {
             activity = this,
             hintView = seekHint,
             currentPosition = { player?.currentPosition ?: 0L },
-            seekBy = { delta -> seekBy(delta) },
+            duration = { player?.duration ?: 0L },
+            seekTo = { target -> player?.seekTo(target) },
+            setSpeed = { speed ->
+                player?.playbackParameters =
+                    androidx.media3.common.PlaybackParameters(speed)
+            },
             onTap = { toggleControls() }
         )
         gestureHelper.attach(gestureLayer)

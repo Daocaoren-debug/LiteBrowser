@@ -21,7 +21,7 @@ https://github.com/Daocaoren-debug/LiteBrowser/releases/download/latest/LiteBrow
 | 本地视频 | 从「更多 → 本地视频」进入：扫描手机里的 `.m3u8`/`.m3u` 与 `.mp4`/`.m4v`（支持 SAF 选目录），**并显式补扫应用自己的下载目录**（它在 `Android/data` 下，公共遍历会跳过，且不需要存储权限），带缩略图预览与扫描缓存；支持**全部 / M3U8 / MP4 类型筛选**、**完整路径查看**、**单个删除与批量删除（自动连带清理独占 ts 分片，弹窗显示可释放大小）**；播放器**手动横竖屏切换**（点右下角按钮），不跟随重力感应 |
 | M3U8 → MP4 | 单个或批量转换：`-c copy` 无损封装，**不重编码，画质不变、体积不增大**；自动补 `aac_adtstoasc`、加 `+faststart`；输出与源文件同目录；前台服务执行，切后台也继续，通知栏看进度。**默认转换成功后删除源 m3u8 及其独占分片（可关闭，二者已合并为一个开关）**；转出的 mp4 会立即加入列表，无需再扫描；同时用「已转换记录 + 同名 mp4 检测」双重去重，即使保留源文件也不会重复转换 |
 | 资源嗅探 | 地址栏右侧 🎬 按钮：双路嗅探本页视频（请求拦截 + 页面内 JS 探针），列出候选地址，点一下进内置播放器 |
-| 内置播放器 | ExoPlayer 内核，支持 m3u8 / mp4 / mpd；**±10 秒按钮**、**进度条拖动**、**左右滑动快退/快进**、**右半屏上下滑调音量、左半屏上下滑调亮度**、直播流识别、带 Referer 绕过防盗链、失败可重试；右下角下载/旋屏按钮（横屏自动纵向排列）。嗅探按钮在地址栏收藏右侧 |
+| 内置播放器 | ExoPlayer 内核，支持 m3u8 / mp4 / mpd；**±10 秒按钮**、**进度条拖动**；**两个播放器共用同一套手势**：左右滑动以按下点为基准快退/快进并显示目标时间、右半屏上下滑调音量、左半屏上下滑调亮度（均 0-100，从当前值起算、避开屏幕边缘、划到顶/底即 100/0）、**长按 2 倍速播放松手恢复**、单击显示/隐藏控制条；直播流识别、带 Referer 绕过防盗链、失败可重试；右下角下载/旋屏按钮（横屏自动纵向排列）。嗅探按钮在地址栏收藏右侧 |
 | 文件下载 | **自研下载服务，不依赖系统 DownloadManager**：纯 `HttpURLConnection`，自动带 Referer/Cookie/UA 应对防盗链；**m3u8 连所有 ts 分片与密钥一起下载**，重写为本地列表后可直接播放/转 mp4；支持断点续传、暂停/继续/取消/重试，进度与状态落盘、被杀后仍可续传；**同一链接不会重复入队**（连点下载按钮只入队一次），同名文件自动加序号；列表显示保存位置，长按复制完整路径；下载到应用专属 Download 目录（无需存储权限），本地视频库会显式补扫该目录；底部工具栏进下载管理 |
 | 网址收藏 | 星标一键收藏，图标即时高亮；收藏夹内可打开、删除 |
 | 历史记录 | 自动记录（同 URL 去重、上限 500 条控制库体积），可打开、单条删除、一键清空 |
@@ -112,7 +112,7 @@ LiteBrowser/
 - **视频全屏**：`onShowCustomView` 挂载到全屏容器 + `FLAG_KEEP_SCREEN_ON` + 沉浸式系统栏，`onHideCustomView` 全部还原。
 - **混合内容**：`MIXED_CONTENT_COMPATIBILITY_MODE`，兼容仍用 http 资源的老站点，同时不完全放开 https 页面。
 - **双路嗅探**：`shouldInterceptRequest` 只旁听、原样返回响应对象（页面行为完全不变），能抓到播放器真实请求的 m3u8 主列表与 mp4 直链；点嗅探按钮时再注入 JS 读 `<video>.currentSrc` 与 `performance` 资源表，补上被 XHR 藏起来的地址。两侧结果按扩展名（mp4/m3u8/mpd/webm/flv/mkv/mov/3gp）去重合并，`.ts` 分片直接丢弃。
-- **内置播放器**：ExoPlayer + 自绘控制条。没用 `PlayerView` 自带控制器，因为需求要 ±10 秒快进快退、滑动手势和旋转/下载按钮；手势层按位移方向区分——横向快进快退，右半屏纵向调 `AudioManager.STREAM_MUSIC`，左半屏纵向调 `Window.screenBrightness`；`configChanges` 保证横竖屏切换不重建 Activity、播放不断；`DefaultHttpDataSource` 带上 Referer/UA 绕防盗链；`STATE_BUFFERING` 显示转圈、`onPlayerError` 给重试。
+- **内置播放器**：ExoPlayer。嗅探播放器用自绘控制条（±10 秒、进度条、下载/旋屏），本地播放器用 `PlayerView` 自带控制器；两者共用 `PlayerGestureHelper`：横向按按下点位移换算 seek 并显示目标时间，纵向按当前值 + 相对位移调 `AudioManager.STREAM_MUSIC` / `Window.screenBrightness`（0-100，有效区上缩 72dp、下缩 120dp，触边即极值），长按 400ms 后设 `PlaybackParameters(2.0f)`、松手恢复；本地播放器在控制器可见时把底部区域的触摸让给 `PlayerView`，避免挡住进度条。`configChanges` 保证横竖屏切换不重建 Activity、播放不断；`DefaultHttpDataSource` 带上 Referer/UA 绕防盗链；`STATE_BUFFERING` 显示转圈、`onPlayerError` 给重试。
 - **无损转换**：`ffmpeg -i in.m3u8 -map 0:v:0 -map 0:a? -c copy -bsf:a aac_adtstoasc -movflags +faststart out.mp4`。只搬流不编码，所以画质不变、体积通常还略小；`aac_adtstoasc` 解决 HLS 里 ADTS AAC 进 MP4 无声；`-movflags +faststart` 移动 moov 到文件头，不增加体积。转换在单线程前台服务里排队，避免多个 FFmpeg 把低端机拖死。
 - **无扩展名分片**：部分下载器把 ts 存成 `xxx.m3u8_contents/0`、`1`…，FFmpeg 的 HLS demuxer 用 `av_match_ext()` 校验扩展名，文件名没有点会直接拒绝（`-allowed_extensions ALL` 也无效）。此时改为按 m3u8 顺序生成 concat 列表，用 `-f concat -safe 0` 拼接分片，绕开该校验。
 - **加密分片**：若 m3u8 带 `#EXT-X-KEY:METHOD=AES-128`，先按规范读密钥（本地或网络）和 IV（显式 IV 或按该段 media sequence 推算），用 `AES/CBC/PKCS7Padding` 流式解密成临时 `.ts`，再走 concat；临时文件转换后即删。

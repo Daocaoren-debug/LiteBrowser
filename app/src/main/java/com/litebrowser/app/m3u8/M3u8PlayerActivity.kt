@@ -157,11 +157,11 @@ class M3u8PlayerActivity : Activity() {
             activity = this,
             hintView = hint,
             currentPosition = { player?.currentPosition ?: 0L },
-            seekBy = { delta ->
-                player?.let { p ->
-                    val target = (p.currentPosition + delta).coerceAtLeast(0L)
-                    p.seekTo(if (p.duration > 0) target.coerceAtMost(p.duration) else target)
-                }
+            duration = { player?.duration ?: 0L },
+            seekTo = { target -> player?.seekTo(target) },
+            setSpeed = { speed ->
+                player?.playbackParameters =
+                    androidx.media3.common.PlaybackParameters(speed)
             },
             onTap = {
                 if (controllerVisible) pv.hideController() else pv.showController()
