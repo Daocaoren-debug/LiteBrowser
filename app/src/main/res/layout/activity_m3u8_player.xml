@@ -5,15 +5,13 @@
     android:layout_height="match_parent"
     android:background="#000000">
 
-    <!-- 播放器自带控制器：拖动进度、播放暂停；显式设 10 秒步长与嗅探播放器一致 -->
+    <!-- 播放器自带控制器：拖动进度、播放暂停；步长在代码里设为 10 秒 -->
     <androidx.media3.ui.PlayerView
         android:id="@+id/playerView"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         app:show_buffering="when_playing"
-        app:use_controller="true"
-        app:fastforward_increment="10000"
-        app:rewind_increment="10000" />
+        app:use_controller="true" />
 
     <!--
       手势层：盖在 PlayerView 上、在标题与旋屏按钮之下。
