@@ -96,7 +96,9 @@ class M3u8PlayerActivity : Activity() {
             setShowNextButton(false)
             controllerShowTimeoutMs = 4000
         }
-        controllerZone = (96 * resources.displayMetrics.density).toInt()
+        // Media3 控制器含进度条 + 一行按钮，让位区覆盖其全部高度，
+        // 否则快退/快进/播放按钮落在手势层里，点了没反应
+        controllerZone = (168 * resources.displayMetrics.density).toInt()
         playerView?.setControllerVisibilityListener(
             ControllerVisibilityListener { visibility -> controllerVisible = visibility == View.VISIBLE }
         )

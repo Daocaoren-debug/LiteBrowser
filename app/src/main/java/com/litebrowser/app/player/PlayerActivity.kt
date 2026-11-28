@@ -53,6 +53,7 @@ class PlayerActivity : Activity() {
         const val EXTRA_TITLE = "extra_title"
 
         private const val SEEK_STEP_MS = 10_000L      // ±10 秒按钮的跳转步长
+        private const val CONTROLS_TIMEOUT_MS = 4_000L  // 控制条无操作自动隐藏
     }
 
     private lateinit var playerView: PlayerView
@@ -139,6 +140,9 @@ class PlayerActivity : Activity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         applyImmersive()
 
+        // 首次进入也按 4 秒自动收起控制条
+        showControls()
+
         startPlayer()
     }
 
@@ -167,16 +171,21 @@ class PlayerActivity : Activity() {
         findViewById<ImageButton>(R.id.rotate_button).setOnClickListener { toggleOrientation() }
         findViewById<ImageButton>(R.id.download_button).setOnClickListener { downloadCurrent() }
         findViewById<ImageButton>(R.id.rewind_button).setOnClickListener {
+            keepControlsAlive()
             seekBy(-SEEK_STEP_MS)
         }
         findViewById<ImageButton>(R.id.forward_button).setOnClickListener {
+            keepControlsAlive()
             seekBy(SEEK_STEP_MS)
         }
         findViewById<Button>(R.id.retry_button).setOnClickListener {
             errorPanel.visibility = View.GONE
             startPlayer()
         }
-        playPauseButton.setOnClickListener { togglePlayPause() }
+        playPauseButton.setOnClickListener {
+            keepControlsAlive()
+            togglePlayPause()
+        }
 
         // 共用手势：横滑快进快退、右半屏音量、左半屏亮度（0-100）、长按快进、单击切控制条
         gestureHelper = PlayerGestureHelper(
@@ -201,10 +210,12 @@ class PlayerActivity : Activity() {
 
             override fun onStartTrackingTouch(seekBar: SeekBar?) {
                 userSeeking = true
+                keepControlsAlive()
             }
 
             override fun onStopTrackingTouch(seekBar: SeekBar?) {
                 userSeeking = false
+                keepControlsAlive()
                 val target = seekBar?.progress?.toLong() ?: 0L
                 player?.seekTo(target)
                 positionText.text = formatTime(target)
@@ -271,14 +282,37 @@ class PlayerActivity : Activity() {
         }
     }
 
-    // ---------------- 手势 ----------------
+    // ---------------- 控制条显示 ----------------
 
+    /** 控制条自动隐藏：显示后 4 秒无操作收起，与主流播放器一致 */
+    private val hideControlsTask = Runnable { hideControls() }
+
+    private fun showControls() {
+        topBar.visibility = View.VISIBLE
+        centerBar.visibility = View.VISIBLE
+        bottomBar.visibility = View.VISIBLE
+        handler.removeCallbacks(hideControlsTask)
+        handler.postDelayed(hideControlsTask, CONTROLS_TIMEOUT_MS)
+    }
+
+    private fun hideControls() {
+        topBar.visibility = View.GONE
+        centerBar.visibility = View.GONE
+        bottomBar.visibility = View.GONE
+        handler.removeCallbacks(hideControlsTask)
+    }
+
+    /** 单击画面切换显示/隐藏；每次显示都重新计时 */
     private fun toggleControls() {
-        val show = topBar.visibility != View.VISIBLE
-        val target = if (show) View.VISIBLE else View.GONE
-        topBar.visibility = target
-        centerBar.visibility = target
-        bottomBar.visibility = target
+        if (topBar.visibility == View.VISIBLE) hideControls() else showControls()
+    }
+
+    /** 有按钮操作或拖动进度条时，重新计时，避免操作中途消失 */
+    private fun keepControlsAlive() {
+        if (topBar.visibility == View.VISIBLE) {
+            handler.removeCallbacks(hideControlsTask)
+            handler.postDelayed(hideControlsTask, CONTROLS_TIMEOUT_MS)
+        }
     }
 
     // ---------------- 进度显示 ----------------
@@ -418,17 +452,20 @@ class PlayerActivity : Activity() {
     override fun onPause() {
         super.onPause()
         gestureHelper.cancel()
+        handler.removeCallbacks(hideControlsTask)
         player?.pause()
     }
 
     override fun onStop() {
         super.onStop()
         handler.removeCallbacks(ticker)
+        handler.removeCallbacks(hideControlsTask)
         gestureHelper.cancel()
     }
 
     override fun onDestroy() {
         handler.removeCallbacks(ticker)
+        handler.removeCallbacks(hideControlsTask)
         gestureHelper.cancel()
         releasePlayer()
         super.onDestroy()
