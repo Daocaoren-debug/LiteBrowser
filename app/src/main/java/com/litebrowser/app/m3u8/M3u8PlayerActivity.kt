@@ -103,8 +103,9 @@ class M3u8PlayerActivity : Activity() {
         playerView?.setControllerVisibilityListener(
             ControllerVisibilityListener { visibility ->
                 controllerVisible = visibility == View.VISIBLE
-                // 标题栏跟随控制器一起显示/隐藏，与嗅探播放器行为一致
+                // 标题栏、旋屏按钮都跟随控制器一起显示/隐藏，与嗅探播放器行为一致
                 titleView.visibility = visibility
+                rotateButton?.visibility = visibility
             }
         )
         bindGestures()

@@ -133,5 +133,5 @@
     <string name="error_page_title">页面打不开</string>
     <string name="error_page_hint">请检查网络或网址后重试，也可以点下方刷新按钮</string>
     <string name="press_again_to_exit">再按一次返回键退出</string>
-    <string name="about_message">轻览浏览器 v1.6.2\n基于系统 WebView 的轻量浏览器，仅播放与列表使用少量 AndroidX/Media3，并内置 FFmpeg 用于视频封装转换。\n\n功能：网页浏览、网页视频全屏、资源嗅探 + 内置播放器（快进快退/拖动进度/长按边缘快进）、本地 m3u8/mp4 扫描播放（含下载目录，手动横竖屏）、m3u8→mp4 无损转换（批量、去重、删源自动清理分片）、自研下载（m3u8 连分片/断点续传/防盗链/去重）、网址收藏、历史记录、分享与复制链接。\n\nFFmpeg 采用 LGPL-3.0 许可，详见仓库 THIRD_PARTY_NOTICES.md。</string>
+    <string name="about_message">轻览浏览器 v1.6.3\n基于系统 WebView 的轻量浏览器，仅播放与列表使用少量 AndroidX/Media3，并内置 FFmpeg 用于视频封装转换。\n\n功能：网页浏览、网页视频全屏、资源嗅探 + 内置播放器（快进快退/拖动进度/长按边缘快进）、本地 m3u8/mp4 扫描播放（含下载目录，手动横竖屏）、m3u8→mp4 无损转换（批量、去重、删源自动清理分片）、自研下载（m3u8 连分片/断点续传/防盗链/去重）、网址收藏、历史记录、分享与复制链接。\n\nFFmpeg 采用 LGPL-3.0 许可，详见仓库 THIRD_PARTY_NOTICES.md。</string>
 </resources>

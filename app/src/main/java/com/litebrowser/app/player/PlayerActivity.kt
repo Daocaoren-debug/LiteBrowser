@@ -291,6 +291,8 @@ class PlayerActivity : Activity() {
         topBar.visibility = View.VISIBLE
         centerBar.visibility = View.VISIBLE
         bottomBar.visibility = View.VISIBLE
+        // 下载/旋屏按钮跟控制条一起显示隐藏
+        if (::playerActions.isInitialized) playerActions.visibility = View.VISIBLE
         handler.removeCallbacks(hideControlsTask)
         handler.postDelayed(hideControlsTask, CONTROLS_TIMEOUT_MS)
     }
@@ -299,6 +301,7 @@ class PlayerActivity : Activity() {
         topBar.visibility = View.GONE
         centerBar.visibility = View.GONE
         bottomBar.visibility = View.GONE
+        if (::playerActions.isInitialized) playerActions.visibility = View.GONE
         handler.removeCallbacks(hideControlsTask)
     }
 
