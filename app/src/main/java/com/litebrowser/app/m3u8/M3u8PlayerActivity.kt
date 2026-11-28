@@ -94,9 +94,6 @@ class M3u8PlayerActivity : Activity() {
             setShowRewindButton(true)        // 快退 10 秒
             setShowPreviousButton(false)
             setShowNextButton(false)
-            // 显式设 10 秒步长，与嗅探播放器一致
-            setFastForwardIncrementMs(10_000L)
-            setRewindIncrementMs(10_000L)
             controllerShowTimeoutMs = 4000
         }
         // Media3 控制器含进度条 + 一行按钮，让位区覆盖其全部高度，
