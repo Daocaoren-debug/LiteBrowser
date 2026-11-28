@@ -99,8 +99,13 @@ class M3u8PlayerActivity : Activity() {
         // Media3 控制器含进度条 + 一行按钮，让位区覆盖其全部高度，
         // 否则快退/快进/播放按钮落在手势层里，点了没反应
         controllerZone = (168 * resources.displayMetrics.density).toInt()
+        val titleView = findViewById<TextView>(R.id.playerTitle)
         playerView?.setControllerVisibilityListener(
-            ControllerVisibilityListener { visibility -> controllerVisible = visibility == View.VISIBLE }
+            ControllerVisibilityListener { visibility ->
+                controllerVisible = visibility == View.VISIBLE
+                // 标题栏跟随控制器一起显示/隐藏，与嗅探播放器行为一致
+                titleView.visibility = visibility
+            }
         )
         bindGestures()
 
